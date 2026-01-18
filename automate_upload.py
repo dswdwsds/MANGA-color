@@ -132,4 +132,3 @@ if __name__ == "__main__":
     src = r"C:\Users\abdob\Desktop\mang\source_images"
     out = r"C:\Users\abdob\Desktop\mang\results"
     colorize_chapter(src, out)
-

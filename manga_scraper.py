@@ -142,12 +142,6 @@ def scrape_manga(url, auto_next=False, processed_urls=None, scraped_chapters=Non
                                 next_name = next_chapter.get('name', '')
                                 next_num = extract_chapter_number(next_name)
                                 
-                                # --- شرط التوقف المؤقت للتجربة (فصل 4) ---
-                                if next_num and int(next_num) > 4:
-                                    print("\n[تنبيه] تم الوصول للفصل 4 (حد التجربة). التوقف الآن.")
-                                    return
-                                # -------------------------------
-
                                 # بناء الرابط
                                 manga_base_name = raw_title.split('/')[0].strip()
                                 manga_slug = slugify(manga_base_name)
@@ -202,4 +196,3 @@ if __name__ == "__main__":
         print("\n✅ تمت جميع العمليات (سحب وتلوين) بنجاح!")
     else:
         print("\nلم يتم سحب أي فصول لتلوينها.")
-
