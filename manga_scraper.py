@@ -44,6 +44,9 @@ def download_single_image(scraper, base_url, img_rel_url, i, folder_name):
     except Exception as e:
         print(f"[خطأ] استثناء في {target_filename}: {e}")
 
+# مخزن مؤقت لاسم المجلد الخاص بالمانجا لتسريع عملية التخطي دون طلبات شبكة
+MANGA_NAME_CACHE = {}
+
 def process_chapter_download(url, scraped_chapters_list):
     """
     تقوم هذه الدالة بمهام "العامل":
@@ -51,8 +54,31 @@ def process_chapter_download(url, scraped_chapters_list):
     2. تحميل الصور بالتوازي (Thread داخل Thread).
     """
     scraper = curlr.Session()
-    # طباعة مبدئية ولكن سنقوم بالتحقق لاحقاً بعد معرفة اسم الفصل
     
+    # --- محاولة التخطي الذكي (Ultra-Fast Skip) ---
+    # نحاول استخراج رقم الفصل و الـ slug من الرابط
+    # الرابط المتوقع: https://mangatime.org/manga/jujutsu-kaisen/chapter-50
+    try:
+        match = re.search(r'/manga/([^/]+)/chapter-(\d+)', url)
+        if match:
+            slug, num = match.groups()
+            
+            # إذا كنا نعرف اسم المجلد لهذه المانجا مسبقاً (من عملية سابقة في نفس الجلسة)
+            if slug in MANGA_NAME_CACHE:
+                manga_folder_cached = MANGA_NAME_CACHE[slug]
+                chapter_folder_cached = f"فصل رقم {num}"
+                identifier_cached = f"{manga_folder_cached}/{chapter_folder_cached}"
+                
+                if is_in_history("scraped", identifier_cached):
+                    print(f"⏩ [Worker] تخطي سريع للفصل {identifier_cached} (من الكاش والسجل).")
+                    full_path = os.path.join(manga_folder_cached, chapter_folder_cached)
+                    if full_path not in scraped_chapters_list:
+                        scraped_chapters_list.append(full_path)
+                    return
+    except Exception as e:
+        pass # إذا فشل التحليل المسبق، نكمل للطريقة العادية
+    # -----------------------------------------------
+
     try:
         response = scraper.get(url, impersonate="chrome110", timeout=30)
         if response.status_code != 200:
@@ -80,6 +106,16 @@ def process_chapter_download(url, scraped_chapters_list):
         manga_folder = "".join([c for c in manga_name if c.isalnum() or c in (' ', '-', '_')]).strip()
         chapter_folder = f"فصل رقم {chapter_num}" if chapter_num else "فصل غير معروف"
         
+        # حفظ الاسم في الكاش للمرات القادمة
+        try:
+             # نحاول استخراج الـ slug من الرابط الحالي لحفظه
+             match_slug = re.search(r'/manga/([^/]+)/chapter-', url)
+             if match_slug:
+                 slug_key = match_slug.group(1)
+                 if slug_key not in MANGA_NAME_CACHE:
+                     MANGA_NAME_CACHE[slug_key] = manga_folder
+        except: pass
+
         # معرف الفصل للتاريخ: "MangaName/ChapterName"
         # نستخدم manga_folder و chapter_folder للتوافق
         identifier = f"{manga_folder}/{chapter_folder}"

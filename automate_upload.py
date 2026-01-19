@@ -178,18 +178,18 @@ def colorize_chapter(source_dir, output_dir):
     image_files.sort(key=lambda x: int(re.search(r'(\d+)', os.path.basename(x)).group(1)) if re.search(r'(\d+)', os.path.basename(x)) else 0)
     
     # تقسيم الصور
-    batch_size = 1
+    batch_size = 3
     batches = [image_files[i:i + batch_size] for i in range(0, len(image_files), batch_size)]
     
     print(f"[{datetime.now().strftime('%H:%M:%S')}] تلوين الفصل: {identifier}")
-    print(f"🚀 بدء المعالجة المتوازية (5 دفعات في وقت واحد) مع نظام إعادة المحاولة الذكي...")
+    print(f"🚀 بدء المعالجة المتوازية (2 دفعات في وقت واحد) مع نظام إعادة المحاولة الذكي...")
 
     base_url = "https://koesan-mangaspaces.hf.space"
     process_url = f"{base_url}/process"
     
     success_all = True
     
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {executor.submit(process_batch, batch, idx, base_url, process_url, output_dir, valid_extensions): idx for idx, batch in enumerate(batches, 1)}
         
         for future in as_completed(futures):
