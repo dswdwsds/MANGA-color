@@ -14,17 +14,17 @@ from datetime import datetime
 
 try:
     from main import main
-except ImportError:
-    logging.error("main.py could not be imported. Ensure it's in the correct path and has a 'main' function.")
+except Exception as e:
+    import traceback
+    error_detail = traceback.format_exc()
+    logging.error(f"Failed to import main.py:\n{error_detail}")
     def main(in_memory_files, operation, source_lang, target_lang, dubbing_type, dubbing_lang, manga_text=None):
-        logging.warning("Using DUMMY main function. Please fix the import for main.py.")
+        logging.warning("Using DUMMY main function due to import failure.")
         results = {}
+        error_msg = f"Critical Error: Could not load AI engine.\nDetails:\n{error_detail}"
+        results["ERROR_REPORT.txt"] = error_msg.encode()
         for name, data_bytes in in_memory_files.items():
-            results[f"processed_{name}"] = b"dummy content for " + name.encode()
-        if manga_text:
-            results["manga_output.png"] = b"dummy_manga_image_bytes"
-        if not results and not manga_text:
-             return {"error.txt": b"No input provided to dummy main."}
+            results[f"processed_{name}"] = b"ERROR: AI Model failed to load. Check ERROR_REPORT.txt"
         return results
 
 app = Flask(__name__)
