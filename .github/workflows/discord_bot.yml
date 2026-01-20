@@ -109,8 +109,8 @@ jobs:
               LAST_SENT_URL="$NEW_URL"
             fi
             
-            # الحالة 2: تحديث دوري كل 30 دقيقة (1800 ثانية)
-            if [ $((CURRENT_TIME - LAST_STATUS_TIME)) -ge 1800 ]; then
+            # الحالة 2: تحديث دوري كل 2 دقيقة (120 ثانية)
+            if [ $((CURRENT_TIME - LAST_STATUS_TIME)) -ge 120 ]; then
                send_discord_msg "ℹ️ **Status Update**\n🔗 Link: $LAST_SENT_URL\n📊 Stats: CPU ${CPU_USAGE}% | RAM ${RAM_USAGE}% | Users: ${ACTIVE_USERS}\n⏳ Time Remaining: ${REM_H}h ${REM_M}m"
                LAST_STATUS_TIME=$CURRENT_TIME
             fi
