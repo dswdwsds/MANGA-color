@@ -251,7 +251,7 @@ def process_files():
             with zipfile.ZipFile(zip_filepath_uploads, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
                 for fn_zip, content_bytes_zip in valid_results_for_zip.items():
                     zipf.writestr(secure_filename(fn_zip), content_bytes_zip) # ZIP içine de secure_filename ile
-            zip_download_url = url_for('download_file', filename=zip_filename_short, _external=True)
+            zip_download_url = url_for('download_file', filename=zip_filename_short, _external=False)
             zip_output_filename_for_db = zip_filename_short
             logging.info(f"Generated ZIP download URL: {zip_download_url}")
         except Exception as e_zip:
