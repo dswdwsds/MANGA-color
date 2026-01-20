@@ -64,6 +64,31 @@ jobs:
                -d "{\"content\": \"🚀 **Evoars Bot Started!**\n🔗 Tunnel Link: $TUNNEL_URL\n✅ The server is running and ready for processing.\"}" \
                "https://discord.com/api/webhooks/1463233978051072049/WYKPPFwYliuCQNLNd-9LHeCfQAKThaHbsF4LO6jQZsaEwpIVaZI4JJ_0alQzIaL2luXs"
           
-          # إبقاء الـ Workflow يعمل لمدة 6 ساعات (الحد الأقصى)
-          echo "Server is running. Keeping alive..."
-          sleep 21600
+          # مراقبة مستمرة لتغير الرابط (Active Monitoring)
+          echo "Entering monitoring mode..."
+          LAST_SENT_URL="$TUNNEL_URL"
+          START_TIME=$(date +%s)
+          
+          while true; do
+            CURRENT_TIME=$(date +%s)
+            ELAPSED=$((CURRENT_TIME - START_TIME))
+            
+            # توقف بعد 6 ساعات (21600 ثانية)
+            if [ $ELAPSED -ge 21600 ]; then
+              echo "Time limit reached. Exiting."
+              break
+            fi
+            
+            # البحث عن أحدث رابط في الملف
+            NEW_URL=$(grep -o 'https://[^ ]*\.lhr\.life' tunnel.log | tail -n 1)
+            
+            if [ ! -z "$NEW_URL" ] && [ "$NEW_URL" != "$LAST_SENT_URL" ]; then
+              echo "⚠️ URL Changed! New: $NEW_URL"
+              curl -H "Content-Type: application/json" \
+                   -d "{\"content\": \"🔄 **Tunnel Reconnected!**\n🆕 New Link: $NEW_URL\"}" \
+                   "https://discord.com/api/webhooks/1463233978051072049/WYKPPFwYliuCQNLNd-9LHeCfQAKThaHbsF4LO6jQZsaEwpIVaZI4JJ_0alQzIaL2luXs"
+              LAST_SENT_URL="$NEW_URL"
+            fi
+            
+            sleep 10
+          done
