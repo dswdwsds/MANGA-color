@@ -1,0 +1,69 @@
+name: Evoars Colorize Bot
+
+on:
+  workflow_dispatch: # يسمح بالتشغيل اليدوي بضغطة زر
+
+jobs:
+  run-server:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10' 
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1 libglib2.0-0
+
+      - name: Install Python requirements
+        working-directory: ./Evoars_local/Evoars-main
+        run: |
+          pip install -r requirements.txt
+          pip install "numpy<2.0.0" "opencv-python-headless==4.6.0.66"
+
+      - name: Start Server & Tunnel
+        working-directory: ./Evoars_local/Evoars-main
+        run: |
+          # تشغيل السيرفر في الخلفية
+          echo "Starting App..."
+          nohup python app.py > app.log 2>&1 &
+          
+          # انتظار قليل للتأكد من بدء السيرفر
+          sleep 10
+          
+          # تشغيل النفق وتوجيه المخرجات لملف
+          echo "Starting SSH Tunnel..."
+          nohup ssh -o StrictHostKeyChecking=no -R 80:127.0.0.1:7860 nokey@localhost.run > tunnel.log 2>&1 &
+          
+          # محاولة استخراج الرابط لمدة دقيقة
+          echo "Waiting for URL..."
+          TUNNEL_URL=""
+          for i in {1..30}; do
+            if grep -q "lhr.life" tunnel.log; then
+              TUNNEL_URL=$(grep -o 'https://[^ ]*\.lhr\.life' tunnel.log | head -n 1)
+              echo "URL Found: $TUNNEL_URL"
+              break
+            fi
+            sleep 2
+          done
+          
+          if [ -z "$TUNNEL_URL" ]; then
+            echo "Failed to get tunnel URL"
+            cat tunnel.log
+            exit 1
+          fi
+          
+          # إرسال الرابط إلى Discord
+          echo "Sending to Discord..."
+          curl -H "Content-Type: application/json" \
+               -d "{\"content\": \"🚀 **Evoars Bot Started!**\n🔗 Tunnel Link: $TUNNEL_URL\n✅ The server is running and ready for processing.\"}" \
+               "https://discord.com/api/webhooks/1463233978051072049/WYKPPFwYliuCQNLNd-9LHeCfQAKThaHbsF4LO6jQZsaEwpIVaZI4JJ_0alQzIaL2luXs"
+          
+          # إبقاء الـ Workflow يعمل لمدة 6 ساعات (الحد الأقصى)
+          echo "Server is running. Keeping alive..."
+          sleep 21600
