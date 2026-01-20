@@ -1,4 +1,4 @@
-import deepl
+from deep_translator import GoogleTranslator
 from tqdm import tqdm
 import numpy as np
 import textwrap3
@@ -74,10 +74,16 @@ def verileri_düzelt(dizi):
 
     return birlesik_string
 
-def translators(text, translator,source_lang, target_lang):
- 
-    output = str(translator.translate_text(text, source_lang=source_lang, target_lang=target_lang))
-    return output
+    try:
+        if source_lang == 'auto':
+            translator = GoogleTranslator(target=target_lang)
+        else:
+            translator = GoogleTranslator(source=source_lang, target=target_lang)
+        output = translator.translate(text)
+        return output
+    except Exception as e:
+        print(f"Translation Error: {e}")
+        return text
 
 def img_mask(dizi, dizi2, img):
 
@@ -126,7 +132,7 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
 def main(in_memory_files,  source_lang, target_lang):
     results = {}
     simple_lama = SimpleLama()
-    translator = deepl.Translator(" APİ KEYS")
+    translator = None
     colorizator = MangaColorizator("cpu", 'networks/generator.zip', 'networks/extractor.pth')
     reader = PaddleOCR(lang=source_lang)
 

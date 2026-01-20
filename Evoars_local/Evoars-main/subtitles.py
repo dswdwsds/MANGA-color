@@ -1,4 +1,4 @@
-import deepl
+from deep_translator import GoogleTranslator
 import whisper
 from moviepy.editor import VideoFileClip 
 import io
@@ -10,11 +10,16 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 def translators(text, translator, source_lang, target_lang):
     try:
-        output = str(translator.translate_text(text, source_lang=source_lang, target_lang=target_lang))
+        # Google Translator expects lowercase language codes generally
+        s_lang = source_lang.lower() if source_lang and source_lang.lower() != 'auto' else 'auto'
+        t_lang = target_lang.lower()
+        
+        translator_instance = GoogleTranslator(source=s_lang, target=t_lang)
+        output = translator_instance.translate(text)
         return output
     except Exception as e:
-        logging.error(f"DeepL translation error for text '{text[:50]}...': {e}")
-        return text # Hata durumunda orijinal metni döndür
+        logging.error(f"Translation error with GoogleTranslator for text '{text[:50]}...': {e}")
+        return text
 
 def extract_audio_from_video(video_path, audio_output_path):
     # Ses dosyasını yazacağımız dizinin var olduğundan emin olalım
@@ -87,10 +92,8 @@ def create_srt_file(segments, translator, source_lang, target_lang):
         
         if original_text:
 
-            effective_source_lang = source_lang.upper() if source_lang and source_lang.lower() != "auto" else None
-            effective_target_lang = target_lang.upper() # DeepL büyük harf bekler (örn: "EN-US", "TR")
-            
-            translated_text = translators(original_text, translator, effective_source_lang, effective_target_lang)
+            # Google Translate logic handled inside translators function, passing raw langs
+            translated_text = translators(original_text, translator, source_lang, target_lang)
         
         srt_content.write(f"{idx + 1}\n")
         srt_content.write(f"{start_time} --> {end_time}\n")
@@ -101,11 +104,8 @@ def create_srt_file(segments, translator, source_lang, target_lang):
 def main(in_memory_files, source_lang, target_lang):
     results = {}
 
-    try:
-        translator = deepl.Translator("da952e5e-99f3-49be-b09f-a4c897d561b7:fx") # API anahtarınız
-    except Exception as e:
-        logging.error(f"Failed to initialize DeepL translator: {e}")
-        return {"error.txt": f"DeepL translator initialization failed: {e}".encode()}
+    # DeepL init removed
+    translator = None
 
     if not in_memory_files:
         logging.error("No input files provided to subtitle main function.")

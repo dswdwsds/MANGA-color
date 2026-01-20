@@ -1,4 +1,4 @@
-deepl==1.17.0
+deep-translator==1.11.4
 paddleocr==2.7.3
 paddlepaddle>=2.6.1
 torch==2.2.2
