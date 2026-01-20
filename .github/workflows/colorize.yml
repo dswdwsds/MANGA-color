@@ -1,0 +1,34 @@
+name: Turbo Manga Colorizer
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */6 * * *' # Run every 6 hours to check for new chapters
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python_version: '3.12'
+
+    - name: Install System Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libgl1-mesa-glx
+
+    - name: Install Python Dependencies
+      run: |
+        pip install -r Evoars_local/Evoars-main/requirements.txt
+        pip install cloudscraper curl_cffi beautifulsoup4 Pillow tqdm
+
+    - name: Run Automation
+      env:
+        CI: true
+      run: |
+        # Run scraper and colorizer in CI mode (no interactive prompts)
+        python manga_scraper.py
