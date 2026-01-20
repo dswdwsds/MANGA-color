@@ -58,36 +58,66 @@ jobs:
             exit 1
           fi
           
-          # إرسال الرابط إلى Discord
-          echo "Sending to Discord..."
-          curl -H "Content-Type: application/json" \
-               -d "{\"content\": \"🚀 **Evoars Bot Started!**\n🔗 Tunnel Link: $TUNNEL_URL\n✅ The server is running and ready for processing.\"}" \
-               "https://discord.com/api/webhooks/1463233978051072049/WYKPPFwYliuCQNLNd-9LHeCfQAKThaHbsF4LO6jQZsaEwpIVaZI4JJ_0alQzIaL2luXs"
+          # دالة لإرسال رسالة Discord
+          send_discord_msg() {
+            local content=$1
+            curl -H "Content-Type: application/json" \
+                 -d "{\"content\": \"$content\"}" \
+                 "https://discord.com/api/webhooks/1463233978051072049/WYKPPFwYliuCQNLNd-9LHeCfQAKThaHbsF4LO6jQZsaEwpIVaZI4JJ_0alQzIaL2luXs"
+          }
+
+          # إرسال رسالة البدء
+          send_discord_msg "🚀 **Evoars Bot Started!**\n🔗 Tunnel Link: $TUNNEL_URL\n✅ Server is running. Time limit: 6 hours."
           
-          # مراقبة مستمرة لتغير الرابط (Active Monitoring)
+          # مراقبة مستمرة (Active Monitoring)
           echo "Entering monitoring mode..."
           LAST_SENT_URL="$TUNNEL_URL"
           START_TIME=$(date +%s)
+          MAX_DURATION=$((6 * 3600))
+          LAST_STATUS_TIME=0
           
           while true; do
             CURRENT_TIME=$(date +%s)
             ELAPSED=$((CURRENT_TIME - START_TIME))
+            REMAINING=$((MAX_DURATION - ELAPSED))
             
-            # توقف بعد 6 ساعات (21600 ثانية)
-            if [ $ELAPSED -ge 21600 ]; then
-              echo "Time limit reached. Exiting."
-              break
-            fi
+            # منع القيم السالبة للوقت المتبقي
+            if [ $REMAINING -lt 0 ]; then REMAINING=0; fi
             
+            # تنسيق الوقت المتبقي
+            REM_H=$((REMAINING / 3600))
+            REM_M=$(( (REMAINING % 3600) / 60 ))
+            
+            # جلب الإحصائيات من السيرفر المحلي
+            STATS_JSON=$(curl -s --max-time 2 http://127.0.0.1:7860/stats || echo "{}")
+            # استخراج القيم باستخدام grep/sed ببساطة لعدم الاعتماد على jq إذا لم يكن مثبتًا
+            CPU_USAGE=$(echo "$STATS_JSON" | grep -o '"cpu_percent":[^,}]*' | cut -d: -f2 | tr -d ' ')
+            RAM_USAGE=$(echo "$STATS_JSON" | grep -o '"ram_percent":[^,}]*' | cut -d: -f2 | tr -d ' ')
+            ACTIVE_USERS=$(echo "$STATS_JSON" | grep -o '"active_users":[^,}]*' | cut -d: -f2 | tr -d ' ')
+            
+            if [ -z "$CPU_USAGE" ]; then CPU_USAGE="N/A"; fi
+            if [ -z "$RAM_USAGE" ]; then RAM_USAGE="N/A"; fi
+            if [ -z "$ACTIVE_USERS" ]; then ACTIVE_USERS="0"; fi
+
             # البحث عن أحدث رابط في الملف
             NEW_URL=$(grep -o 'https://[^ ]*\.lhr\.life' tunnel.log | tail -n 1)
             
+            # الحالة 1: تغير الرابط
             if [ ! -z "$NEW_URL" ] && [ "$NEW_URL" != "$LAST_SENT_URL" ]; then
               echo "⚠️ URL Changed! New: $NEW_URL"
-              curl -H "Content-Type: application/json" \
-                   -d "{\"content\": \"🔄 **Tunnel Reconnected!**\n🆕 New Link: $NEW_URL\"}" \
-                   "https://discord.com/api/webhooks/1463233978051072049/WYKPPFwYliuCQNLNd-9LHeCfQAKThaHbsF4LO6jQZsaEwpIVaZI4JJ_0alQzIaL2luXs"
+              send_discord_msg "🔄 **Tunnel Reconnected!**\n🆕 New Link: $NEW_URL\n📊 Stats: CPU ${CPU_USAGE}% | RAM ${RAM_USAGE}% | Users: ${ACTIVE_USERS}\n⏳ Time Remaining: ${REM_H}h ${REM_M}m"
               LAST_SENT_URL="$NEW_URL"
+            fi
+            
+            # الحالة 2: تحديث دوري كل 30 دقيقة (1800 ثانية)
+            if [ $((CURRENT_TIME - LAST_STATUS_TIME)) -ge 1800 ]; then
+               send_discord_msg "ℹ️ **Status Update**\n🔗 Link: $LAST_SENT_URL\n📊 Stats: CPU ${CPU_USAGE}% | RAM ${RAM_USAGE}% | Users: ${ACTIVE_USERS}\n⏳ Time Remaining: ${REM_H}h ${REM_M}m"
+               LAST_STATUS_TIME=$CURRENT_TIME
+            fi
+            
+            # إذا انتهى الوقت (تجاوز 6 ساعات)، GitHub Actions سيقتل العملية، نرسل تحذير قبلها
+            if [ $REMAINING -le 300 ] && [ $REMAINING -gt 290 ]; then
+               send_discord_msg "⚠️ **Warning: 5 Minutes Remaining!**\nServer will stop soon. Please trigger the workflow again if needed."
             fi
             
             sleep 10

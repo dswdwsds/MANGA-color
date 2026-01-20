@@ -1,4 +1,4 @@
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     console.log("DOM fully loaded and parsed");
 
     const processSelectionDiv = document.getElementById('processSelection');
@@ -97,273 +97,273 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // scripts.js
 
-// ... (önceki kodlar aynı) ...
+    // ... (önceki kodlar aynı) ...
 
-async function showHistoryItemDetails(operationId) {
-    console.log("Showing details for operation:", operationId);
-    // ... (modal kapatma, ana alanları gizleme/gösterme aynı) ...
-    if (modalBackdrop && (modalBackdrop.style.display === 'block' || (sidebarMenu && !sidebarMenu.classList.contains('-translate-x-full')))) {
-        modalBackdrop.click();
-    }
+    async function showHistoryItemDetails(operationId) {
+        console.log("Showing details for operation:", operationId);
+        // ... (modal kapatma, ana alanları gizleme/gösterme aynı) ...
+        if (modalBackdrop && (modalBackdrop.style.display === 'block' || (sidebarMenu && !sidebarMenu.classList.contains('-translate-x-full')))) {
+            modalBackdrop.click();
+        }
 
-    if (processSelectionDiv) processSelectionDiv.classList.add('hidden');
-    if (dynamicFormArea) dynamicFormArea.classList.add('hidden');
-    if (resultsArea) resultsArea.classList.remove('hidden');
-    if (loadingIndicator) loadingIndicator.classList.remove('hidden');
-    if (resultContent) resultContent.innerHTML = '';
+        if (processSelectionDiv) processSelectionDiv.classList.add('hidden');
+        if (dynamicFormArea) dynamicFormArea.classList.add('hidden');
+        if (resultsArea) resultsArea.classList.remove('hidden');
+        if (loadingIndicator) loadingIndicator.classList.remove('hidden');
+        if (resultContent) resultContent.innerHTML = '';
 
 
-    try {
-        const response = await fetch(`/get_history_item_details/${operationId}`);
-        // ... (loading ve response.ok kontrolü aynı) ...
-        if (loadingIndicator) loadingIndicator.classList.add('hidden');
+        try {
+            const response = await fetch(`/get_history_item_details/${operationId}`);
+            // ... (loading ve response.ok kontrolü aynı) ...
+            if (loadingIndicator) loadingIndicator.classList.add('hidden');
 
-        if (!response.ok) {
-            const contentType = response.headers.get("content-type");
-            let errorData;
-            if (contentType && contentType.includes("application/json")) {
-                errorData = await response.json();
-            } else {
-                const errorText = await response.text();
-                console.error("Backend returned non-JSON error:", errorText.substring(0, 500));
-                errorData = { error: 'Server returned an unexpected response. Check server logs.' };
+            if (!response.ok) {
+                const contentType = response.headers.get("content-type");
+                let errorData;
+                if (contentType && contentType.includes("application/json")) {
+                    errorData = await response.json();
+                } else {
+                    const errorText = await response.text();
+                    console.error("Backend returned non-JSON error:", errorText.substring(0, 500));
+                    errorData = { error: 'Server returned an unexpected response. Check server logs.' };
+                }
+                resultContent.innerHTML = `<p class="text-red-400 text-center py-4">${errorData.error || 'Could not load operation details.'}</p>`;
+                return;
             }
-            resultContent.innerHTML = `<p class="text-red-400 text-center py-4">${errorData.error || 'Could not load operation details.'}</p>`;
-            return;
-        }
-        const details = await response.json();
+            const details = await response.json();
 
 
-        // ... (başlık ve zaman damgası aynı) ...
-        const historyDetailTitle = document.createElement('h2');
-        historyDetailTitle.className = 'text-xl font-semibold mb-1 text-center';
-        historyDetailTitle.textContent = `Details for: ${details.operation_name}`;
-        resultContent.appendChild(historyDetailTitle);
+            // ... (başlık ve zaman damgası aynı) ...
+            const historyDetailTitle = document.createElement('h2');
+            historyDetailTitle.className = 'text-xl font-semibold mb-1 text-center';
+            historyDetailTitle.textContent = `Details for: ${details.operation_name}`;
+            resultContent.appendChild(historyDetailTitle);
 
-        const historyDetailTime = document.createElement('p');
-        historyDetailTime.className = 'text-xs text-gray-400 mb-6 text-center';
-        historyDetailTime.textContent = `Processed on: ${new Date(details.timestamp).toLocaleString()} (Status: ${details.status})`;
-        resultContent.appendChild(historyDetailTime);
-
-
-        if (details.status === 'failed') {
-            // ... (hata mesajı gösterimi aynı) ...
-        }
-
-        // --- Girdiler ve Çıktılar için Ana Kapsayıcı (Yan Yana Düzen) ---
-        const ioMainContainer = document.createElement('div');
-        // md:grid-cols-2 ile iki sütunlu yapar. Her sütun kendi içeriğinden sorumlu olur.
-        // overflow-hidden ekleyerek, bir sütunun içeriğinin diğerine taşmasını engelleyebiliriz.
-        // Ancak bu, içerdeki overflow-x-auto'nun çalışması için gerekli değil.
-        ioMainContainer.className = 'grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-8 mb-8';
-        resultContent.appendChild(ioMainContainer);
+            const historyDetailTime = document.createElement('p');
+            historyDetailTime.className = 'text-xs text-gray-400 mb-6 text-center';
+            historyDetailTime.textContent = `Processed on: ${new Date(details.timestamp).toLocaleString()} (Status: ${details.status})`;
+            resultContent.appendChild(historyDetailTime);
 
 
-        // --- INPUTS BÖLÜMÜ ---
-        const inputsSection = document.createElement('div');
-        // Sütunun kendi yüksekliği içeriğine göre ayarlanacak,
-        // ve içindeki container yatayda kayacak.
-        // `min-w-0` veya `overflow-hidden` grid item'ının taşmasını engellemeye yardımcı olabilir.
-        inputsSection.className = 'min-w-0'; // Grid item'ının içeriği sıkıştırmasını sağlar.
-        ioMainContainer.appendChild(inputsSection);
+            if (details.status === 'failed') {
+                // ... (hata mesajı gösterimi aynı) ...
+            }
 
-        const inputsTitle = document.createElement('h3');
-        inputsTitle.className = 'text-lg font-medium mb-4 text-gray-300 text-center md:text-left';
-        inputsTitle.textContent = 'Inputs';
-        inputsSection.appendChild(inputsTitle);
+            // --- Girdiler ve Çıktılar için Ana Kapsayıcı (Yan Yana Düzen) ---
+            const ioMainContainer = document.createElement('div');
+            // md:grid-cols-2 ile iki sütunlu yapar. Her sütun kendi içeriğinden sorumlu olur.
+            // overflow-hidden ekleyerek, bir sütunun içeriğinin diğerine taşmasını engelleyebiliriz.
+            // Ancak bu, içerdeki overflow-x-auto'nun çalışması için gerekli değil.
+            ioMainContainer.className = 'grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-8 mb-8';
+            resultContent.appendChild(ioMainContainer);
 
-        const inputsContainer = document.createElement('div');
-        // DEĞİŞİKLİK: Girdiler için YATAY düzen, kendi içinde kaydırmalı
-        inputsContainer.className = 'flex overflow-x-auto space-x-4 pb-4 horizontal-scroll-custom';
 
-        if (details.input_text_content) {
-            const textItemDiv = await createFileDisplayElement(
-                "Manga Text (Input)",
-                details.input_text_content, null, true, 'text/plain',
-                false // isVerticalCard = false (yatay kartlar için)
-            );
-            inputsContainer.appendChild(textItemDiv);
-        }
+            // --- INPUTS BÖLÜMÜ ---
+            const inputsSection = document.createElement('div');
+            // Sütunun kendi yüksekliği içeriğine göre ayarlanacak,
+            // ve içindeki container yatayda kayacak.
+            // `min-w-0` veya `overflow-hidden` grid item'ının taşmasını engellemeye yardımcı olabilir.
+            inputsSection.className = 'min-w-0'; // Grid item'ının içeriği sıkıştırmasını sağlar.
+            ioMainContainer.appendChild(inputsSection);
 
-        if (details.inputs && details.inputs.length > 0) {
-            for (const file of details.inputs) {
-                const fileDiv = await createFileDisplayElement(
-                    file.original_filename, null, file.download_url, true, file.mimetype,
-                    false // isVerticalCard = false
+            const inputsTitle = document.createElement('h3');
+            inputsTitle.className = 'text-lg font-medium mb-4 text-gray-300 text-center md:text-left';
+            inputsTitle.textContent = 'Inputs';
+            inputsSection.appendChild(inputsTitle);
+
+            const inputsContainer = document.createElement('div');
+            // DEĞİŞİKLİK: Girdiler için YATAY düzen, kendi içinde kaydırmalı
+            inputsContainer.className = 'flex overflow-x-auto space-x-4 pb-4 horizontal-scroll-custom';
+
+            if (details.input_text_content) {
+                const textItemDiv = await createFileDisplayElement(
+                    "Manga Text (Input)",
+                    details.input_text_content, null, true, 'text/plain',
+                    false // isVerticalCard = false (yatay kartlar için)
                 );
-                inputsContainer.appendChild(fileDiv);
+                inputsContainer.appendChild(textItemDiv);
+            }
+
+            if (details.inputs && details.inputs.length > 0) {
+                for (const file of details.inputs) {
+                    const fileDiv = await createFileDisplayElement(
+                        file.original_filename, null, file.download_url, true, file.mimetype,
+                        false // isVerticalCard = false
+                    );
+                    inputsContainer.appendChild(fileDiv);
+                }
+            }
+            if (inputsContainer.children.length === 0) {
+                inputsContainer.innerHTML = `<p class="text-sm text-gray-500 text-center">No file inputs for this operation.</p>`;
+            }
+            inputsSection.appendChild(inputsContainer);
+
+
+            // --- OUTPUTS BÖLÜMÜ ---
+            const outputsSection = document.createElement('div');
+            outputsSection.className = 'min-w-0'; // Grid item'ının içeriği sıkıştırmasını sağlar.
+            ioMainContainer.appendChild(outputsSection);
+
+            const outputsTitle = document.createElement('h3');
+            outputsTitle.className = 'text-lg font-medium mb-4 text-gray-300 text-center md:text-left';
+            outputsTitle.textContent = 'Outputs';
+            outputsSection.appendChild(outputsTitle);
+
+            const outputsContainer = document.createElement('div');
+            // DEĞİŞİKLİK: Çıktılar için de YATAY düzen, kendi içinde kaydırmalı
+            outputsContainer.className = 'flex overflow-x-auto space-x-4 pb-4 horizontal-scroll-custom';
+
+            if (details.outputs && details.outputs.length > 0) {
+                for (const file of details.outputs) {
+                    const fileDiv = await createFileDisplayElement(
+                        file.original_filename, null, file.download_url, true, file.mimetype,
+                        false // isVerticalCard = false
+                    );
+                    outputsContainer.appendChild(fileDiv);
+                }
+            } else if (details.status === 'success') {
+                outputsContainer.innerHTML = `<p class="text-sm text-gray-500 text-center">No output files were generated.</p>`;
+            }
+            outputsSection.appendChild(outputsContainer);
+
+
+            // --- ZIP İNDİRME BUTONU ---
+            if (details.overall_zip_download_url && details.status === 'success') {
+                // ... (ZIP indirme butonu aynı kalabilir, ioMainContainer'ın altında) ...
+                const zipDiv = document.createElement('div');
+                zipDiv.className = `flex flex-col items-center mt-8 pt-6 border-t border-customBorder col-span-1 md:col-span-2`;
+                const zipTitle = document.createElement('h4');
+                zipTitle.className = 'text-lg font-semibold mb-3';
+                zipTitle.textContent = "Download All Outputs (.zip)";
+                zipDiv.appendChild(zipTitle);
+                const zipLink = document.createElement('a');
+                zipLink.href = details.overall_zip_download_url;
+                zipLink.className = 'bg-lightGreen hover:bg-lightGreenHover text-white py-3 px-8 rounded !rounded-button font-medium flex items-center gap-2 text-base';
+                zipLink.innerHTML = `<i class="ri-folder-zip-line ri-lg"></i> <span>Download ZIP</span>`;
+                zipDiv.appendChild(zipLink);
+                resultContent.appendChild(zipDiv);
+            }
+
+            // ... (fonksiyonun sonu aynı) ...
+            if (!resultContent.hasChildNodes() || resultContent.textContent.trim() === "" || (ioMainContainer.children.length === 0 && !(details.overall_zip_download_url && details.status === 'success'))) {
+                resultContent.innerHTML = `<p class="text-yellow-400 text-center py-4">No details to display for this operation.</p>`;
+            }
+
+
+        } catch (error) {
+            // ... (hata yönetimi aynı) ...
+            console.error("Error fetching/displaying history item details:", error);
+            if (loadingIndicator) loadingIndicator.classList.add('hidden');
+            resultContent.innerHTML = `<p class="text-red-400 text-center py-4">Could not load operation details. ${error.message}</p>`;
+        }
+        if (typeof window.applyTranslationsGlobally === "function") {
+            window.applyTranslationsGlobally(localStorage.getItem('preferredLanguage') || 'en');
+        }
+    }
+
+    // createFileDisplayElement fonksiyonu, isVerticalCard parametresini alacak şekilde kalmalı
+    // ve isVerticalCard false ise yatay kart stilini uygulamalı.
+    async function createFileDisplayElement(filename, textContent, downloadUrl, isPreviewable, mimetype, isInputOrOutputItem = false, isVerticalCard = false) { // isVerticalCard parametresi eklendi
+        const itemDiv = document.createElement('div');
+
+        if (isVerticalCard) {
+            // Dikey kart için (bu senaryoda KULLANILMAYACAK, ama fonksiyon genel kalsın)
+            itemDiv.className = 'bg-customBlackHover p-4 rounded-lg shadow-lg flex flex-col items-center w-full';
+        } else {
+            // Yatay kaydırmalı düzen için (İSTENEN BU)
+            itemDiv.className = 'bg-customBlackHover p-3 rounded-lg shadow-lg flex flex-col items-center flex-shrink-0 w-60 md:w-64';
+        }
+
+        const fileNameP = document.createElement('p');
+        fileNameP.className = 'text-sm font-semibold text-gray-200 mb-2 truncate w-full text-center';
+        fileNameP.textContent = filename;
+        itemDiv.appendChild(fileNameP);
+
+        const previewContainer = document.createElement('div');
+        if (isVerticalCard) {
+            previewContainer.className = 'w-full max-w-xs h-48 flex items-center justify-center mb-2 overflow-hidden bg-customBlack rounded';
+        } else {
+            // Yatay kart için önizleme yüksekliği
+            previewContainer.className = 'w-full h-40 flex items-center justify-center mb-2 overflow-hidden bg-customBlack rounded';
+        }
+        itemDiv.appendChild(previewContainer);
+
+        // ... (Önizleme mantığının geri kalanı (previewAdded vs.) aynı kalabilir) ...
+        let previewAdded = false;
+        if (isPreviewable) {
+            if (textContent && mimetype === 'text/plain') {
+                const pre = document.createElement('pre');
+                pre.className = 'text-xs p-2 overflow-auto max-h-full w-full text-gray-300 whitespace-pre-wrap';
+                pre.textContent = textContent;
+                previewContainer.appendChild(pre);
+                previewAdded = true;
+            } else if (downloadUrl && mimetype) {
+                if (mimetype.startsWith('image/')) {
+                    const img = document.createElement('img');
+                    img.src = downloadUrl;
+                    img.alt = filename;
+                    img.className = 'max-h-full max-w-full rounded object-contain shadow cursor-pointer hover:opacity-80 transition-opacity';
+                    img.addEventListener('click', () => { if (typeof window.globalOpenZoomModal === 'function') window.globalOpenZoomModal(downloadUrl); });
+                    previewContainer.appendChild(img);
+                    previewAdded = true;
+                } else if (mimetype.startsWith('video/')) {
+                    const video = document.createElement('video');
+                    video.src = downloadUrl; video.controls = true;
+                    video.className = 'max-h-full max-w-full rounded shadow';
+                    previewContainer.appendChild(video);
+                    previewAdded = true;
+                } else if (mimetype.startsWith('audio/')) {
+                    const audio = document.createElement('audio');
+                    audio.src = downloadUrl; audio.controls = true;
+                    audio.className = 'w-full rounded shadow';
+                    previewContainer.appendChild(audio);
+                    previewAdded = true;
+                } else if (mimetype === 'text/plain' || (filename && filename.endsWith('.srt'))) {
+                    try {
+                        const textResponse = await fetch(downloadUrl);
+                        if (textResponse.ok) {
+                            const rawText = await textResponse.text();
+                            const pre = document.createElement('pre');
+                            pre.className = 'text-xs p-2 overflow-auto max-h-full w-full text-gray-300 whitespace-pre-wrap';
+                            pre.textContent = rawText;
+                            previewContainer.appendChild(pre);
+                            previewAdded = true;
+                        } else {
+                            console.warn(`Failed to fetch text content for ${filename}: ${textResponse.status}`);
+                        }
+                    } catch (e) { console.error("Error fetching text content for preview:", e); }
+                }
             }
         }
-        if (inputsContainer.children.length === 0) {
-            inputsContainer.innerHTML = `<p class="text-sm text-gray-500 text-center">No file inputs for this operation.</p>`;
-        }
-        inputsSection.appendChild(inputsContainer);
 
-
-        // --- OUTPUTS BÖLÜMÜ ---
-        const outputsSection = document.createElement('div');
-        outputsSection.className = 'min-w-0'; // Grid item'ının içeriği sıkıştırmasını sağlar.
-        ioMainContainer.appendChild(outputsSection);
-
-        const outputsTitle = document.createElement('h3');
-        outputsTitle.className = 'text-lg font-medium mb-4 text-gray-300 text-center md:text-left';
-        outputsTitle.textContent = 'Outputs';
-        outputsSection.appendChild(outputsTitle);
-
-        const outputsContainer = document.createElement('div');
-        // DEĞİŞİKLİK: Çıktılar için de YATAY düzen, kendi içinde kaydırmalı
-        outputsContainer.className = 'flex overflow-x-auto space-x-4 pb-4 horizontal-scroll-custom';
-
-        if (details.outputs && details.outputs.length > 0) {
-            for (const file of details.outputs) {
-                const fileDiv = await createFileDisplayElement(
-                    file.original_filename, null, file.download_url, true, file.mimetype,
-                    false // isVerticalCard = false
-                );
-                outputsContainer.appendChild(fileDiv);
-            }
-        } else if (details.status === 'success') {
-             outputsContainer.innerHTML = `<p class="text-sm text-gray-500 text-center">No output files were generated.</p>`;
-        }
-        outputsSection.appendChild(outputsContainer);
-
-
-        // --- ZIP İNDİRME BUTONU ---
-        if (details.overall_zip_download_url && details.status === 'success') {
-            // ... (ZIP indirme butonu aynı kalabilir, ioMainContainer'ın altında) ...
-             const zipDiv = document.createElement('div');
-            zipDiv.className = `flex flex-col items-center mt-8 pt-6 border-t border-customBorder col-span-1 md:col-span-2`;
-            const zipTitle = document.createElement('h4');
-            zipTitle.className = 'text-lg font-semibold mb-3';
-            zipTitle.textContent = "Download All Outputs (.zip)";
-            zipDiv.appendChild(zipTitle);
-            const zipLink = document.createElement('a');
-            zipLink.href = details.overall_zip_download_url;
-            zipLink.className = 'bg-lightGreen hover:bg-lightGreenHover text-white py-3 px-8 rounded !rounded-button font-medium flex items-center gap-2 text-base';
-            zipLink.innerHTML = `<i class="ri-folder-zip-line ri-lg"></i> <span>Download ZIP</span>`;
-            zipDiv.appendChild(zipLink);
-            resultContent.appendChild(zipDiv);
-        }
-
-        // ... (fonksiyonun sonu aynı) ...
-        if (!resultContent.hasChildNodes() || resultContent.textContent.trim() === "" || (ioMainContainer.children.length === 0 && !(details.overall_zip_download_url && details.status === 'success'))) {
-            resultContent.innerHTML = `<p class="text-yellow-400 text-center py-4">No details to display for this operation.</p>`;
+        if (!previewAdded) {
+            const p = document.createElement('p');
+            p.innerHTML = `<i class="ri-file-unknow-line ri-3x text-gray-500"></i>`;
+            p.className = 'text-sm text-gray-400 text-center';
+            previewContainer.appendChild(p);
+            const noPreviewText = document.createElement('span');
+            noPreviewText.className = 'block text-xs text-gray-500 mt-1';
+            noPreviewText.setAttribute('data-translate', 'preview_not_available_short');
+            previewContainer.appendChild(noPreviewText);
         }
 
 
-    } catch (error) {
-        // ... (hata yönetimi aynı) ...
-        console.error("Error fetching/displaying history item details:", error);
-        if (loadingIndicator) loadingIndicator.classList.add('hidden');
-        resultContent.innerHTML = `<p class="text-red-400 text-center py-4">Could not load operation details. ${error.message}</p>`;
-    }
-    if (typeof window.applyTranslationsGlobally === "function") {
-        window.applyTranslationsGlobally(localStorage.getItem('preferredLanguage') || 'en');
-    }
-}
-
-// createFileDisplayElement fonksiyonu, isVerticalCard parametresini alacak şekilde kalmalı
-// ve isVerticalCard false ise yatay kart stilini uygulamalı.
-async function createFileDisplayElement(filename, textContent, downloadUrl, isPreviewable, mimetype, isInputOrOutputItem = false, isVerticalCard = false) { // isVerticalCard parametresi eklendi
-    const itemDiv = document.createElement('div');
-    
-    if (isVerticalCard) {
-        // Dikey kart için (bu senaryoda KULLANILMAYACAK, ama fonksiyon genel kalsın)
-        itemDiv.className = 'bg-customBlackHover p-4 rounded-lg shadow-lg flex flex-col items-center w-full';
-    } else {
-        // Yatay kaydırmalı düzen için (İSTENEN BU)
-        itemDiv.className = 'bg-customBlackHover p-3 rounded-lg shadow-lg flex flex-col items-center flex-shrink-0 w-60 md:w-64';
-    }
-
-    const fileNameP = document.createElement('p');
-    fileNameP.className = 'text-sm font-semibold text-gray-200 mb-2 truncate w-full text-center';
-    fileNameP.textContent = filename;
-    itemDiv.appendChild(fileNameP);
-
-    const previewContainer = document.createElement('div');
-    if (isVerticalCard) {
-        previewContainer.className = 'w-full max-w-xs h-48 flex items-center justify-center mb-2 overflow-hidden bg-customBlack rounded';
-    } else {
-        // Yatay kart için önizleme yüksekliği
-        previewContainer.className = 'w-full h-40 flex items-center justify-center mb-2 overflow-hidden bg-customBlack rounded';
-    }
-    itemDiv.appendChild(previewContainer);
-
-    // ... (Önizleme mantığının geri kalanı (previewAdded vs.) aynı kalabilir) ...
-    let previewAdded = false;
-    if (isPreviewable) {
-        if (textContent && mimetype === 'text/plain') {
-            const pre = document.createElement('pre');
-            pre.className = 'text-xs p-2 overflow-auto max-h-full w-full text-gray-300 whitespace-pre-wrap';
-            pre.textContent = textContent;
-            previewContainer.appendChild(pre);
-            previewAdded = true;
-        } else if (downloadUrl && mimetype) {
-            if (mimetype.startsWith('image/')) {
-                const img = document.createElement('img');
-                img.src = downloadUrl;
-                img.alt = filename;
-                img.className = 'max-h-full max-w-full rounded object-contain shadow cursor-pointer hover:opacity-80 transition-opacity';
-                img.addEventListener('click', () => { if (typeof window.globalOpenZoomModal === 'function') window.globalOpenZoomModal(downloadUrl); });
-                previewContainer.appendChild(img);
-                previewAdded = true;
-            } else if (mimetype.startsWith('video/')) {
-                const video = document.createElement('video');
-                video.src = downloadUrl; video.controls = true;
-                video.className = 'max-h-full max-w-full rounded shadow';
-                previewContainer.appendChild(video);
-                previewAdded = true;
-            } else if (mimetype.startsWith('audio/')) {
-                const audio = document.createElement('audio');
-                audio.src = downloadUrl; audio.controls = true;
-                audio.className = 'w-full rounded shadow';
-                previewContainer.appendChild(audio);
-                previewAdded = true;
-            } else if (mimetype === 'text/plain' || (filename && filename.endsWith('.srt'))) {
-                try {
-                    const textResponse = await fetch(downloadUrl);
-                    if (textResponse.ok) {
-                        const rawText = await textResponse.text();
-                        const pre = document.createElement('pre');
-                        pre.className = 'text-xs p-2 overflow-auto max-h-full w-full text-gray-300 whitespace-pre-wrap';
-                        pre.textContent = rawText;
-                        previewContainer.appendChild(pre);
-                        previewAdded = true;
-                    } else {
-                         console.warn(`Failed to fetch text content for ${filename}: ${textResponse.status}`);
-                    }
-                } catch (e) { console.error("Error fetching text content for preview:", e); }
-            }
+        if (downloadUrl) {
+            const downloadButton = document.createElement('a');
+            downloadButton.href = downloadUrl;
+            downloadButton.target = "_blank";
+            downloadButton.className = 'bg-gray-600 hover:bg-gray-700 text-white py-1.5 px-3 text-xs rounded !rounded-button whitespace-nowrap flex items-center justify-center gap-1 w-full mt-2';
+            downloadButton.innerHTML = `<i class="ri-download-2-line"></i> <span data-translate="download_btn">Download</span>`;
+            itemDiv.appendChild(downloadButton);
         }
+        return itemDiv;
     }
-
-    if (!previewAdded) {
-        const p = document.createElement('p');
-        p.innerHTML = `<i class="ri-file-unknow-line ri-3x text-gray-500"></i>`;
-        p.className = 'text-sm text-gray-400 text-center';
-        previewContainer.appendChild(p);
-        const noPreviewText = document.createElement('span');
-        noPreviewText.className = 'block text-xs text-gray-500 mt-1';
-        noPreviewText.setAttribute('data-translate', 'preview_not_available_short');
-        previewContainer.appendChild(noPreviewText);
-    }
-
-
-    if (downloadUrl) {
-        const downloadButton = document.createElement('a');
-        downloadButton.href = downloadUrl;
-        downloadButton.target = "_blank";
-        downloadButton.className = 'bg-gray-600 hover:bg-gray-700 text-white py-1.5 px-3 text-xs rounded !rounded-button whitespace-nowrap flex items-center justify-center gap-1 w-full mt-2';
-        downloadButton.innerHTML = `<i class="ri-download-2-line"></i> <span data-translate="download_btn">Download</span>`;
-        itemDiv.appendChild(downloadButton);
-    }
-    return itemDiv;
-}
 
     (function initializeTranslations() {
         console.log("Initializing translations...");
         window.translations = {
-             en: {
+            en: {
                 // ... (Mevcut tüm çevirileriniz buraya gelecek) ...
                 logo_text: "logo", logo_text_sidebar: "logo", select_process_title: "Select Process", colorize_btn: "Colorize", translate_btn: "Translate",
                 colorize_translate_btn: "Colorize & Translate", subtitle_btn: "Subtitles", dubbing_btn: "Dubbing", manga_btn: "Text to Manga",
@@ -402,7 +402,9 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
                 // Yeni çeviriler
                 history_load_error: "Error loading history.",
                 no_history_message: "No past operations yet.",
-                preview_not_available_short: "Preview N/A"
+                preview_not_available_short: "Preview N/A",
+                api_key_label: "DeepL API Key (Optional)",
+                api_key_placeholder: "Enter your DeepL API Key"
             },
             ar: {
                 logo_text: "شعار", logo_text_sidebar: "شعار", select_process_title: "اختر العملية", colorize_btn: "تلوين المانجا", translate_btn: "ترجمة المانجا (DeepL)",
@@ -441,7 +443,9 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
                 no_results_to_display: "لا توجد نتائج لعرضها أو تحميلها.",
                 history_load_error: "خطأ في تحميل السجل.",
                 no_history_message: "لا توجد عمليات سابقة بعد.",
-                preview_not_available_short: "معاينة غير متوفرة"
+                preview_not_available_short: "معاينة غير متوفرة",
+                api_key_label: "مفتاح DeepL API (اختياري)",
+                api_key_placeholder: "أدخل مفتاح DeepL API الخاص بك"
             },
             tr: {
                 // ... (Mevcut tüm Türkçe çevirileriniz buraya gelecek) ...
@@ -482,7 +486,9 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
                 // Yeni çeviriler
                 history_load_error: "Geçmiş yüklenirken hata oluştu.",
                 no_history_message: "Henüz geçmiş işlem yok.",
-                preview_not_available_short: "Önizleme Yok"
+                preview_not_available_short: "Önizleme Yok",
+                api_key_label: "DeepL API Anahtarı (İsteğe Bağlı)",
+                api_key_placeholder: "DeepL API Anahtarınızı Girin"
             }
         };
 
@@ -493,7 +499,7 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
 
         function populateMainLanguageSwitcher() { if (!languageSwitcher) return; languageSwitcher.innerHTML = ''; for (const langCode in siteSupportedLanguages) { const option = document.createElement('option'); option.value = langCode; option.textContent = siteSupportedLanguages[langCode]; languageSwitcher.appendChild(option); } }
 
-        function populateFormLanguageSelects(currentSelectedLang = 'en') {
+        function populateFormLanguageSelects(currentSelectedLang = 'ar') {
             document.querySelectorAll('select[name="source-lang"]').forEach(select => {
                 const val = select.value;
                 select.innerHTML = '';
@@ -527,7 +533,7 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
                 }
             });
         }
-        window.applyTranslationsGlobally = function(lang) {
+        window.applyTranslationsGlobally = function (lang) {
             const currentTranslations = window.translations[lang] || window.translations.en;
             if (!currentTranslations) return;
             document.documentElement.lang = lang;
@@ -554,16 +560,16 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
                 if (fileInput && clearAllBtn) {
                     let transKey = fileInput.multiple ? 'remove_image_btn' : (fileInput.accept.includes("video/*") ? 'remove_video_btn' : (fileInput.accept.includes(".srt") ? 'remove_file_btn' : 'remove_single_image_btn'));
                     clearAllBtn.textContent = currentTranslations[transKey] || "Remove";
-                     if (!fileInput.multiple && fileInput.files && fileInput.files.length > 0) {
-                         if (fileInput.accept.includes("image/*")) clearAllBtn.textContent = currentTranslations['remove_single_image_btn'] || "Remove Image";
-                         else if (fileInput.accept.includes("video/*")) clearAllBtn.textContent = currentTranslations['remove_video_btn'] || "Remove Video";
-                         else clearAllBtn.textContent = currentTranslations['remove_file_btn'] || "Remove File";
-                     }
+                    if (!fileInput.multiple && fileInput.files && fileInput.files.length > 0) {
+                        if (fileInput.accept.includes("image/*")) clearAllBtn.textContent = currentTranslations['remove_single_image_btn'] || "Remove Image";
+                        else if (fileInput.accept.includes("video/*")) clearAllBtn.textContent = currentTranslations['remove_video_btn'] || "Remove Video";
+                        else clearAllBtn.textContent = currentTranslations['remove_file_btn'] || "Remove File";
+                    }
                 }
             });
         };
         if (languageSwitcher) { languageSwitcher.addEventListener('change', e => { localStorage.setItem('preferredLanguage', e.target.value); window.applyTranslationsGlobally(e.target.value); }); populateMainLanguageSwitcher(); }
-        const savedLang = localStorage.getItem('preferredLanguage') || 'en';
+        const savedLang = localStorage.getItem('preferredLanguage') || 'ar';
         if (languageSwitcher) languageSwitcher.value = savedLang;
         window.applyTranslationsGlobally(savedLang);
         console.log("Translations initialized. Default/Saved lang:", savedLang);
@@ -581,13 +587,13 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
         let currentZoomScale = 1;
 
         window.hideAllModalsAndOptionalSidebar = (alsoHideSidebar = false) => { // global yapıldı
-            Object.values(window.regularModalWrappers).forEach(mw => { if(mw) mw.style.display = 'none'; });
+            Object.values(window.regularModalWrappers).forEach(mw => { if (mw) mw.style.display = 'none'; });
             if (zoomModalWrapper) zoomModalWrapper.style.display = 'none';
             if (alsoHideSidebar && sidebarMenu) sidebarMenu.classList.add('-translate-x-full');
 
             const isAnyVisible = Object.values(window.regularModalWrappers).some(mw => mw?.style.display === 'flex') ||
-                                 zoomModalWrapper?.style.display === 'flex' ||
-                                 (sidebarMenu && !sidebarMenu.classList.contains('-translate-x-full'));
+                zoomModalWrapper?.style.display === 'flex' ||
+                (sidebarMenu && !sidebarMenu.classList.contains('-translate-x-full'));
             if (modalBackdrop && !isAnyVisible) modalBackdrop.style.display = 'none';
         };
         window.hideAllRegularModals = () => hideAllModalsAndOptionalSidebar(false);
@@ -603,7 +609,7 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
         window.globalOpenZoomModal = (imageUrl) => { if (zoomModalWrapper && zoomedImage) { hideAllModalsAndOptionalSidebar(false); zoomedImage.src = imageUrl; currentZoomScale = 1; zoomedImage.style.transform = `scale(${currentZoomScale})`; zoomedImage.style.cursor = 'zoom-in'; zoomModalWrapper.style.display = 'flex'; zoomModalWrapper.querySelector('.modal-content')?.classList.add('animate-fadeIn'); if (modalBackdrop) modalBackdrop.style.display = 'block'; } };
 
         if (menuButton && sidebarMenu) menuButton.addEventListener('click', () => { sidebarMenu.classList.remove('-translate-x-full'); if (modalBackdrop) modalBackdrop.style.display = 'block'; });
-        if (closeSidebarBtn && sidebarMenu) closeSidebarBtn.addEventListener('click', () => { sidebarMenu.classList.add('-translate-x-full'); if(modalBackdrop && !Object.values(window.regularModalWrappers).some(m=>m?.style.display === 'flex') && zoomModalWrapper?.style.display !== 'flex') modalBackdrop.style.display = 'none';});
+        if (closeSidebarBtn && sidebarMenu) closeSidebarBtn.addEventListener('click', () => { sidebarMenu.classList.add('-translate-x-full'); if (modalBackdrop && !Object.values(window.regularModalWrappers).some(m => m?.style.display === 'flex') && zoomModalWrapper?.style.display !== 'flex') modalBackdrop.style.display = 'none'; });
         closeModalButtons.forEach(btn => btn.addEventListener('click', () => hideAllModalsAndOptionalSidebar(false)));
         closeZoomBtn?.addEventListener('click', () => hideAllModalsAndOptionalSidebar(false));
 
@@ -625,12 +631,12 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
 
 
     // ... (Process button ve form konfigürasyonları aynı kalacak)
-    const processButtons = [ document.getElementById('colorizeBtn'), document.getElementById('translateBtn'), document.getElementById('colorizeTranslateBtn'), document.getElementById('subtitleBtn'), document.getElementById('dubbingBtn'), document.getElementById('mangaBtn') ].filter(Boolean);
+    const processButtons = [document.getElementById('colorizeBtn'), document.getElementById('translateBtn'), document.getElementById('colorizeTranslateBtn'), document.getElementById('subtitleBtn'), document.getElementById('dubbingBtn'), document.getElementById('mangaBtn')].filter(Boolean);
     const formsConfig = { 'colorizeBtn': { element: document.getElementById('colorizeForm'), operation: 'colorize' }, 'translateBtn': { element: document.getElementById('translateForm'), operation: 'translate' }, 'colorizeTranslateBtn': { element: document.getElementById('colorizeTranslateForm'), operation: 'both' }, 'subtitleBtn': { element: document.getElementById('subtitleForm'), operation: 'subtitle' }, 'dubbingBtn': { element: document.getElementById('dubbingForm'), operation: 'dubbing' }, 'mangaBtn': { element: document.getElementById('mangaForm'), operation: 'manga' } };
     function hideAllProcessForms() { Object.values(formsConfig).forEach(formObj => formObj.element?.classList.add('hidden')); if (dynamicFormArea) dynamicFormArea.classList.add('hidden'); }
     function resetButtonStyles() { processButtons.forEach(button => { button.classList.remove('bg-primary', 'text-white'); button.classList.add('bg-customBlack', 'hover:bg-customBlackHover', 'text-white'); }); }
-    processButtons.forEach(button => { button.addEventListener('click', function() { resetButtonStyles(); hideAllProcessForms(); this.classList.remove('bg-customBlack', 'hover:bg-customBlackHover'); this.classList.add('bg-primary', 'text-white'); const formObj = formsConfig[this.id]; if (formObj?.element) { formObj.element.classList.remove('hidden'); if (dynamicFormArea) dynamicFormArea.classList.remove('hidden'); currentOperation = formObj.operation; currentFormElement = formObj.element; if(resultsArea) resultsArea.classList.add('hidden'); if(resultContent) resultContent.innerHTML = ''; if(loadingIndicator) loadingIndicator.classList.add('hidden'); } }); });
-    const dubbingTypeRadios = document.querySelectorAll('input[name="dubbing-type"]'); const autoDubbingOptions = document.getElementById('autoDubbingOptions'); const manualDubbingOptions = document.getElementById('manualDubbingOptions'); if (dubbingTypeRadios.length && autoDubbingOptions && manualDubbingOptions) { dubbingTypeRadios.forEach(radio => { radio.addEventListener('change', function() { autoDubbingOptions.classList.toggle('hidden', this.value !== 'auto'); manualDubbingOptions.classList.toggle('hidden', this.value !== 'manual'); }); }); const checkedDubRadio = document.querySelector('input[name="dubbing-type"]:checked'); if (checkedDubRadio) { autoDubbingOptions.classList.toggle('hidden', checkedDubRadio.value !== 'auto'); manualDubbingOptions.classList.toggle('hidden', checkedDubRadio.value !== 'manual'); } }
+    processButtons.forEach(button => { button.addEventListener('click', function () { resetButtonStyles(); hideAllProcessForms(); this.classList.remove('bg-customBlack', 'hover:bg-customBlackHover'); this.classList.add('bg-primary', 'text-white'); const formObj = formsConfig[this.id]; if (formObj?.element) { formObj.element.classList.remove('hidden'); if (dynamicFormArea) dynamicFormArea.classList.remove('hidden'); currentOperation = formObj.operation; currentFormElement = formObj.element; if (resultsArea) resultsArea.classList.add('hidden'); if (resultContent) resultContent.innerHTML = ''; if (loadingIndicator) loadingIndicator.classList.add('hidden'); } }); });
+    const dubbingTypeRadios = document.querySelectorAll('input[name="dubbing-type"]'); const autoDubbingOptions = document.getElementById('autoDubbingOptions'); const manualDubbingOptions = document.getElementById('manualDubbingOptions'); if (dubbingTypeRadios.length && autoDubbingOptions && manualDubbingOptions) { dubbingTypeRadios.forEach(radio => { radio.addEventListener('change', function () { autoDubbingOptions.classList.toggle('hidden', this.value !== 'auto'); manualDubbingOptions.classList.toggle('hidden', this.value !== 'manual'); }); }); const checkedDubRadio = document.querySelector('input[name="dubbing-type"]:checked'); if (checkedDubRadio) { autoDubbingOptions.classList.toggle('hidden', checkedDubRadio.value !== 'auto'); manualDubbingOptions.classList.toggle('hidden', checkedDubRadio.value !== 'manual'); } }
 
     // ... (updateFileUploadUI ve ilgili event listener'lar aynı kalacak)
     function updateFileUploadUI(fileInputElement) {
@@ -689,7 +695,7 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
         const fileInput = area.querySelector('input[type="file"]');
         const clearAllBtn = area.querySelector('.clear-all-files-btn');
         if (!fileInput) return;
-        fileInput.addEventListener('change', function() { updateFileUploadUI(this); });
+        fileInput.addEventListener('change', function () { updateFileUploadUI(this); });
         area.addEventListener('click', (event) => { if (!event.target.closest('.remove-single-file-btn') && !event.target.closest('.clear-all-files-btn')) fileInput.click(); });
         if (clearAllBtn) { clearAllBtn.addEventListener('click', (event) => { event.stopPropagation(); fileInput.value = ''; const changeEvent = new Event('change', { bubbles: true }); fileInput.dispatchEvent(changeEvent); }); }
         area.addEventListener('dragover', (e) => { e.preventDefault(); area.classList.add('border-primary'); });
@@ -700,10 +706,10 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
 
     // scripts.js
 
-// ... (önceki kodlar aynı kalacak) ...
+    // ... (önceki kodlar aynı kalacak) ...
 
     if (submitBtn) {
-        submitBtn.addEventListener('click', async function() {
+        submitBtn.addEventListener('click', async function () {
             const preferredLang = localStorage.getItem('preferredLanguage') || 'en';
             if (!currentOperation || !currentFormElement) {
                 alert(window.translations[preferredLang]?.error_select_process || 'Please select a process.');
@@ -754,10 +760,10 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
                         }
                     }
                 } else if (inputEl.name && inputEl.value !== undefined) {
-                    if ( (inputEl.tagName === 'SELECT' && inputEl.name !== 'dubbing-lang') ||
-                         inputEl.type === 'radio' ||
-                         (inputEl.value.trim() !== '' && inputEl.type !== 'select-one' && inputEl.type !== 'radio' )
-                       ) {
+                    if ((inputEl.tagName === 'SELECT' && inputEl.name !== 'dubbing-lang') ||
+                        inputEl.type === 'radio' ||
+                        (inputEl.value.trim() !== '' && inputEl.type !== 'select-one' && inputEl.type !== 'radio')
+                    ) {
                         if (!((inputEl.name === 'source-lang' || inputEl.name === 'target-lang') && currentOperation === 'dubbing')) {
                             formData.append(inputEl.name, inputEl.value);
                         }
@@ -792,7 +798,7 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
                             if (!processedFileNames.has(file.name)) {
                                 directDownloadFilesToShow.push(file);
                                 processedFileNames.add(file.name); // Bu aslında gereksiz çünkü set zaten benzersiz tutar
-                                                                   // ama zararı yok, mantığı netleştirir.
+                                // ama zararı yok, mantığı netleştirir.
                             }
                         });
                     }
@@ -838,7 +844,7 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
                         if (numDirect === 1) directDownloadsContainer.className = 'flex justify-center items-start';
                         else if (numDirect === 2) directDownloadsContainer.className = 'grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6';
                         else directDownloadsContainer.className = 'flex overflow-x-auto space-x-4 pb-4 horizontal-scroll-custom';
-                        
+
                         for (const file of directDownloadFilesToShow) {
                             const itemDiv = await createFileDisplayElement(
                                 file.name,
@@ -857,9 +863,9 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
                     if (data.zip_download_url) {
                         const zipDiv = document.createElement('div');
                         const marginTopClassForZip = (previewFilesToShow.length > 0 || directDownloadFilesToShow.length > 0)
-                                               ? 'mt-8 pt-6 border-t border-customBorder' : 'mt-6';
+                            ? 'mt-8 pt-6 border-t border-customBorder' : 'mt-6';
                         zipDiv.className = `flex flex-col items-center ${marginTopClassForZip}`;
-                        
+
                         const zipTitle = document.createElement('h4');
                         zipTitle.className = 'text-lg font-semibold mb-3';
                         zipTitle.setAttribute('data-translate', 'download_all_zip_title');
@@ -879,7 +885,7 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
                     }
 
                 } else {
-                    const errorMessage = data.message || (window.translations[preferredLang]?.error_processing_file || 'Error processing file: ') + ( (typeof data.detail === 'string' ? data.detail : '') || 'Unknown error');
+                    const errorMessage = data.message || (window.translations[preferredLang]?.error_processing_file || 'Error processing file: ') + ((typeof data.detail === 'string' ? data.detail : '') || 'Unknown error');
                     resultContent.innerHTML = `<p class="text-red-400 text-center py-4">${errorMessage}</p>`;
                 }
             } catch (error) {
@@ -891,7 +897,7 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
             } finally {
                 // ... (finally bloğu aynı)
                 loadAndRenderHistory();
-                 if (typeof window.applyTranslationsGlobally === "function") {
+                if (typeof window.applyTranslationsGlobally === "function") {
                     window.applyTranslationsGlobally(localStorage.getItem('preferredLanguage') || 'en');
                 }
             }
@@ -899,7 +905,7 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
     }
 
     if (submitAgainBtn) {
-        submitAgainBtn.addEventListener('click', function() {
+        submitAgainBtn.addEventListener('click', function () {
             if (resultsArea) resultsArea.classList.add('hidden');
             if (processSelectionDiv) processSelectionDiv.classList.remove('hidden');
             if (dynamicFormArea) dynamicFormArea.classList.add('hidden');
@@ -914,26 +920,26 @@ async function createFileDisplayElement(filename, textContent, downloadUrl, isPr
             if (mangaTextArea) {
                 mangaTextArea.value = '';
             }
-             const savedLang = localStorage.getItem('preferredLanguage') || 'en';
-             if (typeof window.applyTranslationsGlobally === "function") {
-                 window.applyTranslationsGlobally(savedLang);
-             }
-             // Burada loadAndRenderHistory() çağrısına gerek yok, geçmiş değişmedi.
+            const savedLang = localStorage.getItem('preferredLanguage') || 'en';
+            if (typeof window.applyTranslationsGlobally === "function") {
+                window.applyTranslationsGlobally(savedLang);
+            }
+            // Burada loadAndRenderHistory() çağrısına gerek yok, geçmiş değişmedi.
         });
     }
 
     loadAndRenderHistory(); // Sayfa ilk yüklendiğinde geçmişi yükle
 
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/static/js/sw.js') // Manifest'teki start_url'e göre ayarla
-          .then(registration => {
-            console.log('Service Worker registered with scope:', registration.scope);
-          })
-          .catch(error => {
-            console.error('Service Worker registration failed:', error);
-          });
-      });
+        window.addEventListener('load', () => {
+            navigator.serviceWorker.register('/static/js/sw.js') // Manifest'teki start_url'e göre ayarla
+                .then(registration => {
+                    console.log('Service Worker registered with scope:', registration.scope);
+                })
+                .catch(error => {
+                    console.error('Service Worker registration failed:', error);
+                });
+        });
     }
 
     console.log("All initializations complete.");

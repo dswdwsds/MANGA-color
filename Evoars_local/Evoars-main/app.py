@@ -11,6 +11,8 @@ import sqlite3
 import uuid
 import json
 from datetime import datetime
+import psutil
+import threading
 
 try:
     from main import main
@@ -34,6 +36,9 @@ HISTORY_FILES_BASE = os.path.join(BASE_DIR, 'history_files')
 DATABASE = os.path.join(BASE_DIR, 'history.db')
 MAX_HISTORY_ITEMS_DB = 10
 
+active_users_count = 0
+active_users_lock = threading.Lock()
+
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 if not os.path.exists(HISTORY_FILES_BASE):
@@ -44,7 +49,7 @@ logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %
 def get_db():
     db = getattr(g, '_database', None)
     if db is None:
-        db = g._database = sqlite3.connect(DATABASE)
+        db = g._database = sqlite3.connect(DATABASE, timeout=30)
         db.row_factory = sqlite3.Row
     return db
 
@@ -96,204 +101,234 @@ def is_safe_path_component(component_string):
 def home():
     return render_template('index.html')
 
+@app.route('/stats')
+def stats():
+    try:
+        cpu = psutil.cpu_percent(interval=None)
+        ram = psutil.virtual_memory().percent
+        with active_users_lock:
+            active = active_users_count
+        return jsonify({
+            'cpu_percent': cpu,
+            'ram_percent': ram,
+            'active_users': active
+        })
+    except Exception as e:
+        logging.error(f"Error in stats endpoint: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/process', methods=['POST'])
 def process_files():
+    global active_users_count
     logging.info("Process endpoint called")
-    operation_id = str(uuid.uuid4())
-    operation_timestamp = datetime.utcnow()
-
-    operation = request.form.get('operation')
-    source_lang = request.form.get('source-lang')
-    target_lang = request.form.get('target-lang')
-    dubbing_type = request.form.get('dubbing-type')
-    dubbing_lang = request.form.get('dubbing-lang')
-    manga_text = request.form.get('manga_text')
-
-    logging.debug(f"Form Data: Op: {operation}, SrcLang: {source_lang}, TrgLang: {target_lang}, DubType: {dubbing_type}, DubLang: {dubbing_lang}, MangaTxtLen: {len(manga_text) if manga_text else 0}")
-
-    current_op_history_path = os.path.join(HISTORY_FILES_BASE, operation_id)
-    current_op_inputs_path = os.path.join(current_op_history_path, "inputs")
-    current_op_outputs_path = os.path.join(current_op_history_path, "outputs")
-    os.makedirs(current_op_inputs_path, exist_ok=True)
-    os.makedirs(current_op_outputs_path, exist_ok=True)
-
-    db = get_db()
-    cursor = db.cursor()
-
-    in_memory_files = {}
-    input_details_for_db = {}
-    if manga_text:
-        input_details_for_db["manga_text"] = manga_text
-
-    file_input_names = ['images', 'video_file_subtitle', 'video-file', 'srt-file']
-    for name_attr in file_input_names:
-        if name_attr in request.files:
-            uploaded_list = request.files.getlist(name_attr)
-            for file_storage in uploaded_list:
-                if file_storage and file_storage.filename:
-                    original_filename = secure_filename(file_storage.filename)
-                    if not original_filename: # secure_filename boş string dönebilir
-                        logging.warning(f"Skipping file with potentially unsafe original name from attribute {name_attr}")
-                        continue
-                    file_bytes = file_storage.read()
-                    in_memory_files[original_filename] = file_bytes
-                    file_storage.seek(0)
-
-                    stored_input_filename_history = f"input_{uuid.uuid4()}_{original_filename}"
-                    stored_input_path_history = os.path.join(current_op_inputs_path, stored_input_filename_history)
-                    with open(stored_input_path_history, 'wb') as f_hist_in:
-                        f_hist_in.write(file_bytes)
-
-                    mimetype_in, _ = mimetypes.guess_type(original_filename)
-                    cursor.execute('''
-                        INSERT INTO operation_files (operation_id, file_type, original_filename, stored_filename, mimetype)
-                        VALUES (?, 'input', ?, ?, ?)
-                    ''', (operation_id, original_filename, stored_input_filename_history, mimetype_in or 'application/octet-stream'))
-                    logging.debug(f"Saved input '{original_filename}' to history as '{stored_input_filename_history}'")
+    
+    # Increment active users
+    with active_users_lock:
+        active_users_count += 1
     
     try:
-        logging.info(f"Calling main processing function for operation: {operation}")
-        results_dict = main(
-            in_memory_files=in_memory_files, operation=operation, source_lang=source_lang,
-            target_lang=target_lang, dubbing_type=dubbing_type, dubbing_lang=dubbing_lang,
-            manga_text=manga_text
-        )
-        logging.info(f"Main function returned {len(results_dict if results_dict else [])} items in results_dict.")
-        process_status = "success"
-    except Exception as e:
-        logging.error(f"Error during 'main' processing: {str(e)}", exc_info=True)
-        process_status = "failed"
-        results_dict = {"error_message.txt": f"Processing error: {str(e)}".encode()}
+        operation_id = str(uuid.uuid4())
+        operation_timestamp = datetime.utcnow()
 
-    if not results_dict or not isinstance(results_dict, dict):
-        logging.warning(f"Processing returned no results or unexpected format for operation '{operation}'.")
-        if process_status != "failed": # Eğer zaten hata yüzünden failed değilse
+        operation = request.form.get('operation')
+        source_lang = request.form.get('source-lang')
+        target_lang = request.form.get('target-lang')
+        dubbing_type = request.form.get('dubbing-type')
+        dubbing_lang = request.form.get('dubbing-lang')
+        manga_text = request.form.get('manga_text')
+
+        logging.debug(f"Form Data: Op: {operation}, SrcLang: {source_lang}, TrgLang: {target_lang}, DubType: {dubbing_type}, DubLang: {dubbing_lang}, MangaTxtLen: {len(manga_text) if manga_text else 0}")
+
+        current_op_history_path = os.path.join(HISTORY_FILES_BASE, operation_id)
+        current_op_inputs_path = os.path.join(current_op_history_path, "inputs")
+        current_op_outputs_path = os.path.join(current_op_history_path, "outputs")
+        os.makedirs(current_op_inputs_path, exist_ok=True)
+        os.makedirs(current_op_outputs_path, exist_ok=True)
+
+        db = get_db()
+        cursor = db.cursor()
+
+        in_memory_files = {}
+        input_details_for_db = {}
+        if manga_text:
+            input_details_for_db["manga_text"] = manga_text
+
+        file_input_names = ['images', 'video_file_subtitle', 'video-file', 'srt-file']
+        for name_attr in file_input_names:
+            if name_attr in request.files:
+                uploaded_list = request.files.getlist(name_attr)
+                for file_storage in uploaded_list:
+                    if file_storage and file_storage.filename:
+                        original_filename = secure_filename(file_storage.filename)
+                        if not original_filename: # secure_filename boş string dönebilir
+                            logging.warning(f"Skipping file with potentially unsafe original name from attribute {name_attr}")
+                            continue
+                        file_bytes = file_storage.read()
+                        in_memory_files[original_filename] = file_bytes
+                        file_storage.seek(0)
+
+                        stored_input_filename_history = f"input_{uuid.uuid4()}_{original_filename}"
+                        stored_input_path_history = os.path.join(current_op_inputs_path, stored_input_filename_history)
+                        with open(stored_input_path_history, 'wb') as f_hist_in:
+                            f_hist_in.write(file_bytes)
+
+                        mimetype_in, _ = mimetypes.guess_type(original_filename)
+                        cursor.execute('''
+                            INSERT INTO operation_files (operation_id, file_type, original_filename, stored_filename, mimetype)
+                            VALUES (?, 'input', ?, ?, ?)
+                        ''', (operation_id, original_filename, stored_input_filename_history, mimetype_in or 'application/octet-stream'))
+                        logging.debug(f"Saved input '{original_filename}' to history as '{stored_input_filename_history}'")
+        
+        # تحرير قفل قاعدة البيانات قبل البدء في المعالجة الطويلة
+        db.commit()
+        
+        try:
+            logging.info(f"Calling main processing function for operation: {operation}")
+            results_dict = main(
+                in_memory_files=in_memory_files, operation=operation, source_lang=source_lang,
+                target_lang=target_lang, dubbing_type=dubbing_type, dubbing_lang=dubbing_lang,
+                manga_text=manga_text
+            )
+            logging.info(f"Main function returned {len(results_dict if results_dict else [])} items in results_dict.")
+            process_status = "success"
+        except Exception as e:
+            logging.error(f"Error during 'main' processing: {str(e)}", exc_info=True)
             process_status = "failed"
-            results_dict = {"error_message.txt": b"Processing returned empty or invalid result."}
+            results_dict = {"error_message.txt": f"Processing error: {str(e)}".encode()}
 
-    operation_name_map_py = {
-        'colorize': 'Colorize', 'translate': 'Translate', 'both': 'Colorize & Translate',
-        'subtitle': 'Subtitles', 'dubbing': 'Dubbing', 'manga': 'Text to Manga'
-    }
-    display_operation_name = operation_name_map_py.get(operation, str(operation).capitalize() if operation else "Unknown")
-    
-    preview_files_data = []
-    direct_download_files = []
-    valid_results_for_zip = {}
-    zip_output_filename_for_db = None
+        if not results_dict or not isinstance(results_dict, dict):
+            logging.warning(f"Processing returned no results or unexpected format for operation '{operation}'.")
+            if process_status != "failed": # Eğer zaten hata yüzünden failed değilse
+                process_status = "failed"
+                results_dict = {"error_message.txt": b"Processing returned empty or invalid result."}
 
-    for filename_out, content_or_path in (results_dict.items() if results_dict else []):
-        output_file_bytes = None
-        original_output_filename = secure_filename(filename_out)
-        if not original_output_filename:
-            logging.warning(f"Skipping output file with potentially unsafe original name: {filename_out}")
-            continue
+        operation_name_map_py = {
+            'colorize': 'Colorize', 'translate': 'Translate', 'both': 'Colorize & Translate',
+            'subtitle': 'Subtitles', 'dubbing': 'Dubbing', 'manga': 'Text to Manga'
+        }
+        display_operation_name = operation_name_map_py.get(operation, str(operation).capitalize() if operation else "Unknown")
+        
+        preview_files_data = []
+        direct_download_files = []
+        valid_results_for_zip = {}
+        zip_output_filename_for_db = None
 
-        if isinstance(content_or_path, bytes):
-            output_file_bytes = content_or_path
-        elif isinstance(content_or_path, str) and os.path.exists(content_or_path):
-            try:
-                with open(content_or_path, 'rb') as f_path_read:
-                    output_file_bytes = f_path_read.read()
-                
-                # UPLOAD_FOLDER'a kopyalama (direct download için)
-                destination_path_in_uploads = os.path.join(UPLOAD_FOLDER, original_output_filename)
-                shutil.copy(content_or_path, destination_path_in_uploads)
-                download_url = url_for('download_processed_file', filename=original_output_filename, _external=True)
-                mimetype_for_direct, _ = mimetypes.guess_type(original_output_filename)
-                direct_download_files.append({
-                    "name": original_output_filename, "download_url": download_url,
-                    "mimetype": mimetype_for_direct or 'application/octet-stream'
-                })
-            except Exception as e_read_path:
-                logging.error(f"Error reading/copying output file from path {content_or_path} for {original_output_filename}: {e_read_path}")
+        for filename_out, content_or_path in (results_dict.items() if results_dict else []):
+            output_file_bytes = None
+            original_output_filename = secure_filename(filename_out)
+            if not original_output_filename:
+                logging.warning(f"Skipping output file with potentially unsafe original name: {filename_out}")
                 continue
-        else:
-            logging.warning(f"Unsupported output type for {original_output_filename}: {type(content_or_path)}, value: {str(content_or_path)[:100]}")
-            continue
 
-        if output_file_bytes:
-            valid_results_for_zip[original_output_filename] = output_file_bytes
-            stored_output_filename_history = f"output_{uuid.uuid4()}_{original_output_filename}"
-            stored_output_path_history = os.path.join(current_op_outputs_path, stored_output_filename_history)
-            with open(stored_output_path_history, 'wb') as f_hist_out:
-                f_hist_out.write(output_file_bytes)
-
-            mimetype_out, _ = mimetypes.guess_type(original_output_filename)
-            if process_status == "success":
-                cursor.execute('''
-                    INSERT INTO operation_files (operation_id, file_type, original_filename, stored_filename, mimetype)
-                    VALUES (?, 'output', ?, ?, ?)
-                ''', (operation_id, original_output_filename, stored_output_filename_history, mimetype_out or 'application/octet-stream'))
-                logging.debug(f"Saved output '{original_output_filename}' to history as '{stored_output_filename_history}'")
-
-            mimetype_preview = mimetype_out or 'application/octet-stream'
-            if mimetype_preview.startswith(('image/', 'video/', 'audio/')) or mimetype_preview == 'text/plain' or original_output_filename.endswith(('.srt', '.txt', '.json')):
+            if isinstance(content_or_path, bytes):
+                output_file_bytes = content_or_path
+            elif isinstance(content_or_path, str) and os.path.exists(content_or_path):
                 try:
-                    base64_content = base64.b64encode(output_file_bytes).decode('utf-8')
+                    with open(content_or_path, 'rb') as f_path_read:
+                        output_file_bytes = f_path_read.read()
+                    
+                    # UPLOAD_FOLDER'a kopyalama (direct download için)
+                    destination_path_in_uploads = os.path.join(UPLOAD_FOLDER, original_output_filename)
+                    shutil.copy(content_or_path, destination_path_in_uploads)
+                    download_url = url_for('download_processed_file', filename=original_output_filename, _external=True)
+                    mimetype_for_direct, _ = mimetypes.guess_type(original_output_filename)
+                    direct_download_files.append({
+                        "name": original_output_filename, "download_url": download_url,
+                        "mimetype": mimetype_for_direct or 'application/octet-stream'
+                    })
+                except Exception as e_read_path:
+                    logging.error(f"Error reading/copying output file from path {content_or_path} for {original_output_filename}: {e_read_path}")
+                    continue
+            else:
+                logging.warning(f"Unsupported output type for {original_output_filename}: {type(content_or_path)}, value: {str(content_or_path)[:100]}")
+                continue
+
+            if output_file_bytes:
+                valid_results_for_zip[original_output_filename] = output_file_bytes
+                stored_output_filename_history = f"output_{uuid.uuid4()}_{original_output_filename}"
+                stored_output_path_history = os.path.join(current_op_outputs_path, stored_output_filename_history)
+                with open(stored_output_path_history, 'wb') as f_hist_out:
+                    f_hist_out.write(output_file_bytes)
+
+                mimetype_out, _ = mimetypes.guess_type(original_output_filename)
+                if process_status == "success":
+                    cursor.execute('''
+                        INSERT INTO operation_files (operation_id, file_type, original_filename, stored_filename, mimetype)
+                        VALUES (?, 'output', ?, ?, ?)
+                    ''', (operation_id, original_output_filename, stored_output_filename_history, mimetype_out or 'application/octet-stream'))
+                    logging.debug(f"Saved output '{original_output_filename}' to history as '{stored_output_filename_history}'")
+
+                mimetype_preview = mimetype_out or 'application/octet-stream'
+                if mimetype_preview.startswith(('image/', 'video/', 'audio/')) or mimetype_preview == 'text/plain' or original_output_filename.endswith(('.srt', '.txt', '.json')):
+                    try:
+                        base64_content = base64.b64encode(output_file_bytes).decode('utf-8')
+                        preview_files_data.append({
+                            "name": original_output_filename, "mimetype": mimetype_preview,
+                            "data_url": f"data:{mimetype_preview};base64,{base64_content}"
+                        })
+                    except Exception as e_b64: logging.error(f"Error base64 encoding for preview '{original_output_filename}': {e_b64}")
+                else:
                     preview_files_data.append({
                         "name": original_output_filename, "mimetype": mimetype_preview,
-                        "data_url": f"data:{mimetype_preview};base64,{base64_content}"
+                        "data_url": None, "content_length": len(output_file_bytes)
                     })
-                except Exception as e_b64: logging.error(f"Error base64 encoding for preview '{original_output_filename}': {e_b64}")
-            else:
-                preview_files_data.append({
-                    "name": original_output_filename, "mimetype": mimetype_preview,
-                    "data_url": None, "content_length": len(output_file_bytes)
-                })
-    
-    zip_download_url = None
-    if valid_results_for_zip and process_status == "success":
-        op_name_for_zip = str(operation).replace(" ", "_") if operation else "general"
-        zip_filename_short = f'results_{operation_id.split("-")[0]}_{op_name_for_zip}.zip'
-        zip_filepath_uploads = os.path.join(UPLOAD_FOLDER, zip_filename_short)
-        try:
-            with zipfile.ZipFile(zip_filepath_uploads, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
-                for fn_zip, content_bytes_zip in valid_results_for_zip.items():
-                    zipf.writestr(secure_filename(fn_zip), content_bytes_zip) # ZIP içine de secure_filename ile
-            zip_download_url = url_for('download_file', filename=zip_filename_short, _external=False)
-            zip_output_filename_for_db = zip_filename_short
-            logging.info(f"Generated ZIP download URL: {zip_download_url}")
-        except Exception as e_zip:
-            logging.error(f"Error zipping files: {e_zip}", exc_info=True)
+        
+        zip_download_url = None
+        if valid_results_for_zip and process_status == "success":
+            op_name_for_zip = str(operation).replace(" ", "_") if operation else "general"
+            zip_filename_short = f'results_{operation_id.split("-")[0]}_{op_name_for_zip}.zip'
+            zip_filepath_uploads = os.path.join(UPLOAD_FOLDER, zip_filename_short)
+            try:
+                with zipfile.ZipFile(zip_filepath_uploads, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
+                    for fn_zip, content_bytes_zip in valid_results_for_zip.items():
+                        zipf.writestr(secure_filename(fn_zip), content_bytes_zip) # ZIP içine de secure_filename ile
+                zip_download_url = url_for('download_file', filename=zip_filename_short, _external=False)
+                zip_output_filename_for_db = zip_filename_short
+                logging.info(f"Generated ZIP download URL: {zip_download_url}")
+            except Exception as e_zip:
+                logging.error(f"Error zipping files: {e_zip}", exc_info=True)
 
-    cursor.execute('''
-        INSERT INTO operations (id, operation_name, timestamp, status, input_details, output_zip_filename)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', (operation_id, display_operation_name, operation_timestamp, process_status,
-          json.dumps(input_details_for_db) if input_details_for_db else None,
-          zip_output_filename_for_db if process_status == "success" else None))
+        cursor.execute('''
+            INSERT INTO operations (id, operation_name, timestamp, status, input_details, output_zip_filename)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (operation_id, display_operation_name, operation_timestamp, process_status,
+              json.dumps(input_details_for_db) if input_details_for_db else None,
+              zip_output_filename_for_db if process_status == "success" else None))
 
-    cursor.execute("SELECT id FROM operations ORDER BY timestamp DESC")
-    all_ops_ids_ordered = [row['id'] for row in cursor.fetchall()]
-    
-    if len(all_ops_ids_ordered) > MAX_HISTORY_ITEMS_DB:
-        ids_to_delete = all_ops_ids_ordered[MAX_HISTORY_ITEMS_DB:]
-        for old_op_id in ids_to_delete:
-            logging.info(f"Deleting old history operation: {old_op_id}")
-            cursor.execute("DELETE FROM operations WHERE id = ?", (old_op_id,))
-            old_op_folder_to_delete = os.path.join(HISTORY_FILES_BASE, old_op_id)
-            if os.path.exists(old_op_folder_to_delete):
-                try:
-                    shutil.rmtree(old_op_folder_to_delete)
-                    logging.info(f"Deleted history files folder: {old_op_folder_to_delete}")
-                except Exception as e_rm_hist:
-                    logging.error(f"Error deleting history files folder {old_op_folder_to_delete}: {e_rm_hist}")
-    db.commit()
+        cursor.execute("SELECT id FROM operations ORDER BY timestamp DESC")
+        all_ops_ids_ordered = [row['id'] for row in cursor.fetchall()]
+        
+        if len(all_ops_ids_ordered) > MAX_HISTORY_ITEMS_DB:
+            ids_to_delete = all_ops_ids_ordered[MAX_HISTORY_ITEMS_DB:]
+            for old_op_id in ids_to_delete:
+                logging.info(f"Deleting old history operation: {old_op_id}")
+                cursor.execute("DELETE FROM operations WHERE id = ?", (old_op_id,))
+                old_op_folder_to_delete = os.path.join(HISTORY_FILES_BASE, old_op_id)
+                if os.path.exists(old_op_folder_to_delete):
+                    try:
+                        shutil.rmtree(old_op_folder_to_delete)
+                        logging.info(f"Deleted history files folder: {old_op_folder_to_delete}")
+                    except Exception as e_rm_hist:
+                        logging.error(f"Error deleting history files folder {old_op_folder_to_delete}: {e_rm_hist}")
+        db.commit()
 
-    if process_status == "failed":
-        error_msg_to_show = "An error occurred during processing."
-        if results_dict and "error_message.txt" in results_dict:
-             error_msg_to_show = results_dict["error_message.txt"].decode(errors='ignore')
+        if process_status == "failed":
+            error_msg_to_show = "An error occurred during processing."
+            if results_dict and "error_message.txt" in results_dict:
+                 error_msg_to_show = results_dict["error_message.txt"].decode(errors='ignore')
+            return jsonify({
+                'status': 'error', 'message': error_msg_to_show,
+                'preview_files': preview_files_data
+            }), 500
+
         return jsonify({
-            'status': 'error', 'message': error_msg_to_show,
-            'preview_files': preview_files_data
-        }), 500
-
-    return jsonify({
-        'status': 'ready', 'preview_files': preview_files_data,
-        'zip_download_url': zip_download_url, 'direct_download_files': direct_download_files
-    })
+            'status': 'ready', 'preview_files': preview_files_data,
+            'zip_download_url': zip_download_url, 'direct_download_files': direct_download_files
+        })
+    finally:
+        with active_users_lock:
+            active_users_count -= 1
+            if active_users_count < 0: active_users_count = 0
 
 @app.route('/download/<filename>')
 def download_file(filename):
@@ -474,4 +509,4 @@ def get_history_item_details(operation_id):
         return jsonify({'error': 'An unexpected error occurred.', 'details': str(e), 'status_code': 500}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=7860, debug=True, use_reloader=False)
+    app.run(host='0.0.0.0', port=7860, debug=True, use_reloader=False, threaded=True)
