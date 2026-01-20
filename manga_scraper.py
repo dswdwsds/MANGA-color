@@ -11,7 +11,7 @@ from curl_cffi import requests as curlr
 from concurrent.futures import ThreadPoolExecutor
 
 # استيراد دالة التلوين
-from automate_upload import colorize_chapter, is_in_history, add_to_history  # استيراد دالة التلوين والتاريخ
+from automate_upload import colorize_chapter, is_in_history, add_to_history, DEFAULT_BASE_URL, start_background_services
 
 def slugify(text):
     text = text.lower()
@@ -271,6 +271,13 @@ if __name__ == "__main__":
     
     print("\n>>> بدء مرحلة السحب المتوازي (Parallel Scraping) <<<")
     crawl_and_dispatch(start_url, scraped_chapters_list)
+    # سؤال للمستخدم عن تشغيل الخدمات
+    choice = input("هل تريد تشغيل السيرفر والنفق الآن؟ (y/n): ").strip().lower()
+    if choice == 'y':
+        target_url = start_background_services()
+    else:
+        usr_url = input(f"أدخل رابط السيرفر العام (اضغط Enter لاستخدام {DEFAULT_BASE_URL}): ").strip()
+        target_url = usr_url if usr_url else DEFAULT_BASE_URL
     
     if scraped_chapters_list:
         print("\n" + "="*50)
@@ -287,7 +294,7 @@ if __name__ == "__main__":
             color_output_path = os.path.join(manga_color_dir, chapter_dir_name)
             
             print(f"\n[تلوين] معالجة: {chapter_dir_name}...")
-            colorize_chapter(chapter_path, color_output_path)
+            colorize_chapter(chapter_path, color_output_path, target_url)
         
         print("\n✅ تمت المهمة بالكامل!")
     else:

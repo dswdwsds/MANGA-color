@@ -19,25 +19,43 @@ MAX_BATCH_SIZE_BYTES = MAX_BATCH_SIZE_MB * 1024 * 1024
 DEFAULT_BASE_URL = "http://127.0.0.1:7860"
 
 def start_background_services():
-    """تشغيل السيرفر والنفق في الخلفية"""
+    """تشغيل السيرفر والنفق واستخراج الرابط تلقائياً"""
     print("--- [1/2] جاري تشغيل سيرفر Evoars... ---")
-    # التأكد من المجلد الصحيح
     project_dir = os.path.dirname(os.path.abspath(__file__))
     if "Evoars-main" not in project_dir:
         project_dir = os.path.join(project_dir, "Evoars_local", "Evoars-main")
     
     # تشغيل السيرفر
-    server_proc = subprocess.Popen([sys.executable, "app.py"], cwd=project_dir)
+    subprocess.Popen([sys.executable, "app.py"], cwd=project_dir)
     print("⏳ ننتظر 10 ثوانٍ ليتفعل السيرفر...")
     time.sleep(10)
     
-    print("--- [2/2] جاري إنشاء رابط SSH Tunnel... ---")
-    # تشغيل النفق
-    tunnel_cmd = "ssh -R 80:127.0.0.1:7860 nokey@localhost.run"
-    subprocess.Popen(tunnel_cmd, shell=True)
+    print("--- [2/2] جاري إنشاء رابط SSH Tunnel واستخراجه... ---")
+    tunnel_cmd = "ssh -o StrictHostKeyChecking=no -R 80:127.0.0.1:7860 nokey@localhost.run"
     
-    print("\n✅ تم إرسال أوامر التشغيل. يرجى مراقبة الشاشة لنسخ الرابط العام.")
-    print("ملاحظة: إذا كنت في Codespaces، يمكنك استخدام رابط الـ Ports الثابت أيضاً.\n")
+    # تشغيل النفق وقراءة المخرجات لاستخراج الرابط
+    proc = subprocess.Popen(tunnel_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    
+    tunnel_url = None
+    # البحث عن الرابط في أول 20 سطر من المخرجات
+    start_time = time.time()
+    while time.time() - start_time < 30: # مهلة 30 ثانية
+        line = proc.stdout.readline()
+        if not line: break
+        print(f"  [SSH] {line.strip()}") # طباعة المخرجات للمستخدم للشفافية
+        
+        # البحث عن نمط الرابط (https://....lhr.life)
+        match = re.search(r'https?://[a-zA-Z0-9-]+\.lhr\.life', line)
+        if match:
+            tunnel_url = match.group(0)
+            print(f"\n🚀 تم اكتشاف الرابط تلقائياً: {tunnel_url}")
+            break
+            
+    if not tunnel_url:
+        print("\n⚠️ لم نتمكن من استخراج الرابط تلقائياً، سنستخدم الرابط المحلي.")
+        tunnel_url = DEFAULT_BASE_URL
+        
+    return tunnel_url
 
 def process_batch(batch, batch_idx, base_url, process_url, output_dir, valid_extensions):
     """رفع الدفعة بناءً على الحجم الكلي"""
@@ -109,10 +127,19 @@ HISTORY_FILE = "history.json"
 history_lock = threading.Lock()
 
 def load_history():
-    if not os.path.exists(HISTORY_FILE): return {"colored": []}
+    if not os.path.exists(HISTORY_FILE): return {"scraped": [], "colored": []}
     try:
-        with open(HISTORY_FILE, "r", encoding="utf-8") as f: return json.load(f)
-    except: return {"colored": []}
+        with open(HISTORY_FILE, "r", encoding="utf-8") as f: 
+            content = json.load(f)
+            # التأكد من وجود المفاتيح الضرورية
+            if "scraped" not in content: content["scraped"] = []
+            if "colored" not in content: content["colored"] = []
+            return content
+    except: return {"scraped": [], "colored": []}
+
+def is_in_history(category, item):
+    history = load_history()
+    return item in history.get(category, [])
 
 def add_to_history(category, item):
     with history_lock:
@@ -180,10 +207,10 @@ if __name__ == "__main__":
     # سؤال للمستخدم عن تشغيل الخدمات
     choice = input("هل تريد تشغيل السيرفر والنفق الآن؟ (y/n): ").strip().lower()
     if choice == 'y':
-        start_background_services()
-    
-    usr_url = input(f"أدخل رابط السيرفر العام (اضغط Enter لاستخدام {DEFAULT_BASE_URL}): ").strip()
-    target_url = usr_url if usr_url else DEFAULT_BASE_URL
+        target_url = start_background_services()
+    else:
+        usr_url = input(f"أدخل رابط السيرفر العام (اضغط Enter لاستخدام {DEFAULT_BASE_URL}): ").strip()
+        target_url = usr_url if usr_url else DEFAULT_BASE_URL
     
     # تحديد المجلدات حسب البيئة (Codespaces أو Local)
     is_codespace = os.path.exists("/workspaces")
