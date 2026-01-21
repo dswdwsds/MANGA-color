@@ -5,6 +5,12 @@ import colorize_and_translate
 import subtitles
 import manuel_dubbing
 
+try:
+    import manga_maker
+except ImportError:
+    logging.warning("manga_maker.py not found, manga feature will be unavailable.")
+    manga_maker = None
+
 logger = logging.getLogger(__name__) # app.py'de yapılandırılan logger'ı kullanır
 
 def main(in_memory_files, operation, source_lang=None, target_lang=None, 
@@ -48,8 +54,13 @@ def main(in_memory_files, operation, source_lang=None, target_lang=None,
                 results = manuel_dubbing.main(in_memory_files, dubbing_lang)
 
         elif operation == "manga":
-            logger.warning("Manga operation requested but manga_maker.py is missing.")
-            return {"error.txt": b"Text to Manga feature is currently unavailable (Script missing)."}
+            if manga_maker is None:
+                logger.warning("Manga operation requested but manga_maker.py is missing.")
+                return {"error.txt": b"Text to Manga feature is currently unavailable (Script missing)."}
+            if not manga_text:
+                logger.warning("Manga op: no text provided.")
+                return {"error.txt": b"Text to Manga requires text input."}
+            results = manga_maker.main(in_memory_files, manga_text=manga_text)
 
         else:
             logger.error(f"Unknown operation received in main.py: {operation}")

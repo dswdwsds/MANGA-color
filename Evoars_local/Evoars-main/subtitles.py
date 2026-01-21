@@ -150,7 +150,7 @@ def main(in_memory_files, source_lang, target_lang):
         
         srt_content = create_srt_file(segments, translator, source_lang, target_lang)
         output_srt_filename = f"{base_name}.srt"
-        results[output_srt_filename] = srt_content.encode("utf-8")
+        results[output_srt_filename] = srt_content.encode("utf-8-sig")
         logging.info(f"SRT file content created for: {output_srt_filename}")
 
     except Exception as e:

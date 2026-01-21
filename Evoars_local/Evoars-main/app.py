@@ -262,9 +262,15 @@ def process_files():
                 if mimetype_preview.startswith(('image/', 'video/', 'audio/')) or mimetype_preview == 'text/plain' or original_output_filename.endswith(('.srt', '.txt', '.json')):
                     try:
                         base64_content = base64.b64encode(output_file_bytes).decode('utf-8')
+                        # Ensure charset is specified for text types to prevent Mojibake
+                        mime_header = mimetype_preview
+                        if mime_header == 'text/plain' or original_output_filename.endswith(('.srt', '.txt', '.json')):
+                             if 'charset=' not in mime_header:
+                                 mime_header += ';charset=utf-8'
+                        
                         preview_files_data.append({
                             "name": original_output_filename, "mimetype": mimetype_preview,
-                            "data_url": f"data:{mimetype_preview};base64,{base64_content}"
+                            "data_url": f"data:{mime_header};base64,{base64_content}"
                         })
                     except Exception as e_b64: logging.error(f"Error base64 encoding for preview '{original_output_filename}': {e_b64}")
                 else:
@@ -358,7 +364,14 @@ def download_processed_file(filename):
     if not os.path.exists(file_path) or not os.path.isfile(file_path):
         logging.error(f"Processed file not found for download: {file_path}")
         return jsonify({'status': 'error', 'message': 'File not found.'}), 404
-    return send_file(file_path, as_attachment=True, download_name=filename)
+    
+    # تحديد mimetype مع charset للملفات النصية
+    mimetype_guess, _ = mimetypes.guess_type(filename)
+    if filename.endswith(('.srt', '.txt', '.json')):
+        # استخدام mimetype مع charset=utf-8 للملفات النصية
+        return send_file(file_path, as_attachment=True, download_name=filename, mimetype='text/plain; charset=utf-8')
+    else:
+        return send_file(file_path, as_attachment=True, download_name=filename, mimetype=mimetype_guess)
 
 @app.route('/get_history', methods=['GET'])
 def get_history_endpoint():
@@ -439,6 +452,10 @@ def serve_history_file(operation_id, file_type_plural, stored_filename):
 
         download_name_original = row['original_filename']
         mimetype_original = row['mimetype'] if row['mimetype'] else 'application/octet-stream' # Varsayılan mimetype
+
+        # إضافة charset=utf-8 للملفات النصية
+        if download_name_original.endswith(('.srt', '.txt', '.json')):
+            mimetype_original = 'text/plain; charset=utf-8'
 
         return send_file(file_path, as_attachment=True, download_name=download_name_original, mimetype=mimetype_original)
     except Exception as e:

@@ -279,6 +279,21 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
     img = np.array(img)
     return img
 
+def clean_ocr_text(text):
+    """تنظيف النص المقروء من OCR من الأحرف الغريبة والضوضاء"""
+    if not text or not isinstance(text, str):
+        return ""
+    
+    # إزالة الأحرف الغريبة والرموز غير المرغوبة
+    import re
+    # نحتفظ بالعربية والإنجليزية والأرقام والمسافات وعلامات الترقيم
+    cleaned = re.sub(r'[^\u0600-\u06FFa-zA-Z0-9\s\.\?\!\,\-\'\"]+', '', text)
+    
+    # إزالة المسافات الزائدة
+    cleaned = ' '.join(cleaned.split())
+    
+    return cleaned.strip()
+
 def main(in_memory_files,  source_lang, target_lang):
     results = {}
     simple_lama = SimpleLama()
@@ -286,7 +301,13 @@ def main(in_memory_files,  source_lang, target_lang):
     translator = None
     # Dil eşleştirmesi yap
     ocr_lang = PADDLE_LANG_MAP.get(source_lang, 'en') # Bilinmeyen dil için 'en' kullan
-    reader = PaddleOCR(lang=ocr_lang)
+    # تحسين إعدادات PaddleOCR
+    reader = PaddleOCR(
+        lang=ocr_lang, 
+        use_angle_cls=True,
+        det_db_thresh=0.3,
+        det_db_box_thresh=0.5
+    )
 
     for resim_adı, resim_verisi in tqdm(in_memory_files.items(), desc="İşleniyor", unit="resim"):
         print(resim_adı)
@@ -304,9 +325,16 @@ def main(in_memory_files,  source_lang, target_lang):
         # Orijinal dosya uzantısını belirle
         file_extension = resim_adı.split('.')[-1].lower()
         img_copy = img.copy()
-        img[img >= 150] = 255
+        
+        # تحسين معالجة الصورة للـ OCR
+        img_for_ocr = img_copy.copy()
+        if len(img_for_ocr.shape) == 3:
+            gray = cv2.cvtColor(img_for_ocr, cv2.COLOR_BGR2GRAY)
+            # استخدام CLAHE لتحسين التباين بشكل أفضل من threshold
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            img_for_ocr = clahe.apply(gray)
 
-        dizi = reader.ocr(img)
+        dizi = reader.ocr(img_for_ocr)
         dizi = [item for sublist in dizi if sublist is not None for item in sublist]
 
         if len(dizi) > 1:
@@ -325,10 +353,19 @@ def main(in_memory_files,  source_lang, target_lang):
 
                 for a in i:
                     kordinatlar_.append(dizi[a][0])
-                    string.append(str(dizi[a][1][0]))
+                    # تنظيف النص المقروء من OCR
+                    raw_text = str(dizi[a][1][0])
+                    cleaned_text = clean_ocr_text(raw_text)
+                    string.append(cleaned_text)
 
                 kordinatlar.append(kordinatlar_)
-                konuşma_dizisi.append(translators(verileri_düzelt(string), translator,source_lang, target_lang))
+                # ترجمة النص المنظف فقط
+                text_to_translate = verileri_düzelt(string)
+                if text_to_translate.strip():  # فقط إذا كان هناك نص
+                    translated = translators(text_to_translate, translator, source_lang, target_lang)
+                    konuşma_dizisi.append(translated)
+                else:
+                    konuşma_dizisi.append("")  # نص فارغ
 
             resim = beyaz_kare_olustur(kordinatlar, konuşma_dizisi, img_copy, simple_lama)
 
