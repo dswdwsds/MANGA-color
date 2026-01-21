@@ -145,8 +145,8 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
             
     if is_arabic:
         # Linux/Codespaces için garantili çözüm: Google Font indir
-        font_path = "fonts/NotoSansArabic-Regular.ttf"
-        download_font_if_missing(font_path, "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansArabic/NotoSansArabic-Regular.ttf")
+        font_path = "fonts/Amiri-Regular.ttf"
+        download_font_if_missing(font_path, "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf")
         
         if not os.path.exists(font_path):
             if os.path.exists("C:/Windows/Fonts/arial.ttf"):
@@ -155,6 +155,8 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
                 font_path = "fonts/Arial.ttf"
             else:
                 font_path = "fonts/mangat.ttf"
+    else:
+        font_path = "fonts/mangat.ttf"
 
     mask = img_mask(dizi, dizi2, img)
     
@@ -189,7 +191,9 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
         best_fit_lines = []
         best_fit_height_diff = float('inf')
         
-        font_sizes = list(range(40, 9, -2)) 
+        # Iterate sizes downwards strictly
+        # Amiri needs slightly larger sizes to be readable, but we must fit.
+        font_sizes = list(range(40, 7, -2)) # 40 down to 8
         
         for size in font_sizes:
             try:
@@ -197,15 +201,24 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
             except:
                 test_font = ImageFont.load_default()
             
-            char_width_factor = 0.6 if is_arabic else 0.5
+            # Heuristic for wrap width
+            char_width_factor = 0.5 if is_arabic else 0.5 
             estimated_char_width = size * char_width_factor
             wrap_cols = int(box_width / estimated_char_width)
             if wrap_cols < 1: wrap_cols = 1
             
             test_lines = textwrap.wrap(text_to_draw, width=wrap_cols)
             
-            total_h_px = len(test_lines) * (size + 4)
+            # STRICT Vertical Check
+            # Amiri needs line height ~ size * 1.5 usually? Let's use size + 8 to be safe/readable
+            current_line_height = size + 6 
+            total_h_px = len(test_lines) * current_line_height
             
+            if total_h_px > box_height:
+                # Too tall, skip to smaller size immediately
+                continue
+            
+            # If vertical fits, check horizontal
             fits_width = True
             for line in test_lines:
                 line_check = line
@@ -223,16 +236,10 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
                     break
             
             if fits_width:
-                 if total_h_px <= box_height:
-                     chosen_font = test_font
-                     chosen_lines = test_lines
-                     line_height = size + 4
-                     break
-                 else:
-                     if (total_h_px - box_height) < best_fit_height_diff:
-                         best_fit_height_diff = total_h_px - box_height
-                         best_fit_font = test_font
-                         best_fit_lines = test_lines
+                 chosen_font = test_font
+                 chosen_lines = test_lines
+                 line_height = current_line_height
+                 break
 
         if chosen_font is None:
              try:

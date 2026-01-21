@@ -147,9 +147,9 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
             break
             
     if is_arabic:
-        # Linux/Codespaces için garantili çözüm: Google Font indir
-        font_path = "fonts/NotoSansArabic-Regular.ttf"
-        download_font_if_missing(font_path, "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansArabic/NotoSansArabic-Regular.ttf")
+        # CodeSpaces/Linux için Amiri fontu (Noto'dan daha iyi Presentation Form desteği olabilir)
+        font_path = "fonts/Amiri-Regular.ttf"
+        download_font_if_missing(font_path, "https://github.com/google/fonts/raw/main/ofl/amiri/Amiri-Regular.ttf")
         
         if not os.path.exists(font_path):
              # Fallbacks
@@ -159,6 +159,8 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
                 font_path = "fonts/Arial.ttf"
             else:
                 font_path = "fonts/mangat.ttf" 
+    else:
+        font_path = "fonts/mangat.ttf"
 
     mask = img_mask(dizi, dizi2, img)
     
@@ -188,13 +190,9 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
         chosen_lines = []
         line_height = 0
         
-        # Keep track of the "best bad fit" just in case nothing fits perfectly
-        best_fit_font = None
-        best_fit_lines = []
-        best_fit_height_diff = float('inf')
-        
-        # Range of font sizes to try
-        font_sizes = list(range(40, 9, -2)) # 40 down to 10
+        # Iterate sizes downwards strictly
+        # Amiri needs slightly larger sizes to be readable, but we must fit.
+        font_sizes = list(range(40, 7, -2)) # 40 down to 8
         
         for size in font_sizes:
             try:
@@ -203,17 +201,23 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
                 test_font = ImageFont.load_default()
             
             # Heuristic for wrap width
-            char_width_factor = 0.6 if is_arabic else 0.5
+            char_width_factor = 0.5 if is_arabic else 0.5 
             estimated_char_width = size * char_width_factor
             wrap_cols = int(box_width / estimated_char_width)
             if wrap_cols < 1: wrap_cols = 1
             
             test_lines = textwrap.wrap(text_to_draw, width=wrap_cols)
             
-            # Helper to calculate dimensions
-            max_w_px = 0
-            total_h_px = len(test_lines) * (size + 4)
+            # STRICT Vertical Check
+            # Amiri needs line height ~ size * 1.5 usually? Let's use size + 8 to be safe/readable
+            current_line_height = size + 6 
+            total_h_px = len(test_lines) * current_line_height
             
+            if total_h_px > box_height:
+                # Too tall, skip to smaller size immediately
+                continue
+            
+            # If vertical fits, check horizontal
             fits_width = True
             for line in test_lines:
                 line_check = line
@@ -225,47 +229,29 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
                 try:
                     w = draw.textlength(line_check, font=test_font)
                 except:
-                    w = size * len(line_check) # crude fallback
+                    w = size * len(line_check)
                 if w > box_width:
                     fits_width = False
                     break
             
-            # Check vertical fit
             if fits_width:
-                 if total_h_px <= box_height:
-                     # Perfect fit!
-                     chosen_font = test_font
-                     chosen_lines = test_lines
-                     line_height = size + 4
-                     break
-                 else:
-                     # Fits width but too tall. Track it as a candidate if it's the "least overflowing" so far?
-                     # Actually, smaller fonts will naturally overflow less vertically.
-                     # So we just continue to smaller sizes.
-                     if (total_h_px - box_height) < best_fit_height_diff:
-                         best_fit_height_diff = total_h_px - box_height
-                         best_fit_font = test_font
-                         best_fit_lines = test_lines
-                         # best_fit_line_height = size + 4 # Save this if needed, but we re-calc below
+                 chosen_font = test_font
+                 chosen_lines = test_lines
+                 line_height = current_line_height
+                 break
         
-        # If no perfect fit found, use the smallest size or the one that overflowed least
+        # Fallback: If nothing fit perfectly, use smallest size anyway
         if chosen_font is None:
-             # If we have a "best bad fit" (e.g. slight vertical overflow), use it
-             # otherwise default to smallest
              try:
-                 chosen_font = ImageFont.truetype(font_path, 10)
+                 chosen_font = ImageFont.truetype(font_path, 8)
              except:
                  chosen_font = ImageFont.load_default()
-             chosen_lines = textwrap.wrap(text_to_draw, width=int(box_width/6))
+             # Force wrap to fit width at least
+             chosen_lines = textwrap.wrap(text_to_draw, width=max(1, int(box_width/5)))
              line_height = 14
 
-        # Draw
         total_block_h = len(chosen_lines) * line_height
-        # Ensure we don't start negative if it overflows vertically
         start_y = int((y1 + y2 - total_block_h) / 2)
-        
-        # Dynamic clipping or strict centering? 
-        # For now, let's just draw.
         
         for i, line in enumerate(chosen_lines):
             line_to_render = line
