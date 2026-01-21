@@ -47,6 +47,10 @@ def main(in_memory_files, operation, source_lang=None, target_lang=None,
             if dubbing_type == "manual":
                 results = manuel_dubbing.main(in_memory_files, dubbing_lang)
 
+        elif operation == "manga":
+            logger.warning("Manga operation requested but manga_maker.py is missing.")
+            return {"error.txt": b"Text to Manga feature is currently unavailable (Script missing)."}
+
         else:
             logger.error(f"Unknown operation received in main.py: {operation}")
             return {"error.txt": f"Unknown operation: {operation}".encode()}
