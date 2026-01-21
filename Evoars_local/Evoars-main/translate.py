@@ -1,9 +1,11 @@
 from deep_translator import GoogleTranslator
 from tqdm import tqdm
 import numpy as np
-import textwrap3
+import textwrap
 import cv2
 from PIL import ImageFont, ImageDraw
+import arabic_reshaper
+from bidi.algorithm import get_display
 import sys
 import os
 
@@ -11,6 +13,23 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "lib")))
 from lib.simple_lama_inpainting.models import SimpleLama
 from paddleocr import PaddleOCR
+
+PADDLE_LANG_MAP = {
+    'ar': 'arabic',
+    'en': 'en',
+    'zh': 'ch',
+    'ja': 'japan',
+    'ko': 'korean',
+    'ru': 'cyrillic',
+    'tr': 'latin',
+    'fr': 'latin',
+    'de': 'latin',
+    'es': 'latin',
+    'it': 'latin',
+    'pt': 'latin',
+    'pl': 'latin',
+    'auto': 'en' # Default fallback
+}
 
 def yakın_kelimeleri_bul(kordinatlar):
 
@@ -104,7 +123,24 @@ def img_mask(dizi, dizi2, img):
     
 def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
     
+    # Varsayılan font
     font_path = "fonts/mangat.ttf"
+    is_arabic = False
+
+    # Metnin Arapça olup olmadığını kontrol et
+    for text_segment in dizi2:
+        if any('\u0600' <= char <= '\u06FF' for char in text_segment):
+            is_arabic = True
+            break
+            
+    if is_arabic:
+        # Sistem Arial fontunu önceliklendir (Daha güvenilir)
+        if os.path.exists("C:/Windows/Fonts/arial.ttf"):
+            font_path = "C:/Windows/Fonts/arial.ttf"
+        elif os.path.exists("fonts/Arial.ttf"):
+            font_path = "fonts/Arial.ttf"
+        else:
+            print("Warning: Arabic font not found. Using default.")
 
     mask = img_mask(dizi, dizi2, img)
     
@@ -112,18 +148,45 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
     değişken = 0
     draw = ImageDraw.Draw(img)
 
-    font = ImageFont.truetype(font_path, 14)
+    try:
+        font = ImageFont.truetype(font_path, 14)
+    except:
+        font = ImageFont.load_default()
+
     for eleman in dizi:
+        if değişken >= len(dizi2): break
 
         all_x = [point[0] for sublist in eleman for point in sublist]
         all_y = [point[1] for sublist in eleman for point in sublist]
         x1, y1 = max(all_x), max(all_y)
         x2, y2 = min(all_x), min(all_y)
 
-        wrapped_text = textwrap3.wrap(dizi2[değişken], width=20)
+        text_to_draw = dizi2[değişken]
+        
+        if is_arabic:
+             try:
+                 reshaped_text = arabic_reshaper.reshape(text_to_draw)
+                 # base_dir='R' is critical for correct RTL layout
+                 bidi_text = get_display(reshaped_text, base_dir='R')
+                 wrapped_text = textwrap.wrap(bidi_text, width=25)
+             except Exception as e:
+                 print(f"Arabic processing error: {e}")
+                 wrapped_text = textwrap.wrap(text_to_draw, width=25)
+        else:
+             wrapped_text = textwrap.wrap(text_to_draw, width=25)
+
+
         for i, line in enumerate(wrapped_text):
+            # Arapça için sağa hizalama veya ortalama
+            # Burada basitlik için yine ortalama (center) kullanıyoruz ama Bidi ile harfler düzelecek
             y = int((y1 + y2) / 2) + i * 20
-            x = int((x1 + x2 - int(draw.textlength(line, font=font))) / 2)
+            
+            try:
+                text_width = draw.textlength(line, font=font)
+            except:
+                text_width = draw.textsize(line, font=font)[0] # Eski Pillow sürümleri için
+                
+            x = int((x1 + x2 - int(text_width)) / 2)
             draw.text((x,y-20), line, fill=(0,0,0), font=font)
         değişken += 1
 
@@ -135,7 +198,9 @@ def main(in_memory_files,  source_lang, target_lang):
     simple_lama = SimpleLama()
     # translator nesnesi artık dinamik olarak oluşturulacak, burada gerek yok
     translator = None
-    reader = PaddleOCR(lang=source_lang)
+    # Dil eşleştirmesi yap
+    ocr_lang = PADDLE_LANG_MAP.get(source_lang, 'en') # Bilinmeyen dil için 'en' kullan
+    reader = PaddleOCR(lang=ocr_lang)
 
     for resim_adı, resim_verisi in tqdm(in_memory_files.items(), desc="İşleniyor", unit="resim"):
         print(resim_adı)
