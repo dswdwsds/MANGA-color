@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "lib"
 from lib.simple_lama_inpainting.models import SimpleLama
 from lib.simple_lama_inpainting.models import SimpleLama
 from paddleocr import PaddleOCR
+import requests
 
 PADDLE_LANG_MAP = {
     'ar': 'arabic',
@@ -32,6 +33,17 @@ PADDLE_LANG_MAP = {
     'pl': 'latin',
     'auto': 'en' # Default fallback
 }
+
+def download_font_if_missing(font_path, url):
+    if not os.path.exists(font_path):
+        print(f"Downloading font to {font_path}...")
+        try:
+            response = requests.get(url)
+            with open(font_path, 'wb') as f:
+                f.write(response.content)
+            print("Font downloaded successfully.")
+        except Exception as e:
+            print(f"Failed to download font: {e}")
 
 def yakın_kelimeleri_bul(kordinatlar):
 
@@ -126,8 +138,6 @@ def img_mask(dizi, dizi2, img):
     
 def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
     
-    # Varsayılan font
-    font_path = "fonts/Arial.ttf" # Default, but checked below
     is_arabic = False
 
     # Metnin Arapça olup olmadığını kontrol et
@@ -137,23 +147,24 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
             break
             
     if is_arabic:
-        if os.path.exists("C:/Windows/Fonts/arial.ttf"):
-            font_path = "C:/Windows/Fonts/arial.ttf"
-        elif os.path.exists("fonts/Arial.ttf"):
-            font_path = "fonts/Arial.ttf"
-        else:
-            print("Warning: Arabic font not found. Using default.")
+        # Linux/Codespaces için garantili çözüm: Google Font indir
+        font_path = "fonts/NotoSansArabic-Regular.ttf"
+        download_font_if_missing(font_path, "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansArabic/NotoSansArabic-Regular.ttf")
+        
+        if not os.path.exists(font_path):
+             # Fallbacks
+            if os.path.exists("C:/Windows/Fonts/arial.ttf"):
+                font_path = "C:/Windows/Fonts/arial.ttf"
+            elif os.path.exists("fonts/Arial.ttf"):
+                font_path = "fonts/Arial.ttf"
+            else:
+                font_path = "fonts/mangat.ttf" 
 
     mask = img_mask(dizi, dizi2, img)
     
     img = simple_lama(img, mask)
     değişken = 0
     draw = ImageDraw.Draw(img)
-
-    try:
-        font = ImageFont.truetype(font_path, 14)
-    except:
-        font = ImageFont.load_default()
 
     for eleman in dizi:
         if değişken >= len(dizi2): break
@@ -162,30 +173,122 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
         all_y = [point[1] for sublist in eleman for point in sublist]
         x1, y1 = max(all_x), max(all_y)
         x2, y2 = min(all_x), min(all_y)
+        
+        box_width = abs(x2 - x1)
+        box_height = abs(y2 - y1)
+        
+        if box_width < 10 or box_height < 10:
+             değişken += 1
+             continue
 
         text_to_draw = dizi2[değişken]
-
-        if is_arabic:
+        
+        # Dynamic Font Sizing & Wrapping Logic
+        chosen_font = None
+        chosen_lines = []
+        line_height = 0
+        
+        # Keep track of the "best bad fit" just in case nothing fits perfectly
+        best_fit_font = None
+        best_fit_lines = []
+        best_fit_height_diff = float('inf')
+        
+        # Range of font sizes to try
+        font_sizes = list(range(40, 9, -2)) # 40 down to 10
+        
+        for size in font_sizes:
+            try:
+                test_font = ImageFont.truetype(font_path, size)
+            except:
+                test_font = ImageFont.load_default()
+            
+            # Heuristic for wrap width
+            char_width_factor = 0.6 if is_arabic else 0.5
+            estimated_char_width = size * char_width_factor
+            wrap_cols = int(box_width / estimated_char_width)
+            if wrap_cols < 1: wrap_cols = 1
+            
+            test_lines = textwrap.wrap(text_to_draw, width=wrap_cols)
+            
+            # Helper to calculate dimensions
+            max_w_px = 0
+            total_h_px = len(test_lines) * (size + 4)
+            
+            fits_width = True
+            for line in test_lines:
+                line_check = line
+                if is_arabic:
+                    try:
+                         line_check = get_display(arabic_reshaper.reshape(line), base_dir='R')
+                    except: pass
+                
+                try:
+                    w = draw.textlength(line_check, font=test_font)
+                except:
+                    w = size * len(line_check) # crude fallback
+                if w > box_width:
+                    fits_width = False
+                    break
+            
+            # Check vertical fit
+            if fits_width:
+                 if total_h_px <= box_height:
+                     # Perfect fit!
+                     chosen_font = test_font
+                     chosen_lines = test_lines
+                     line_height = size + 4
+                     break
+                 else:
+                     # Fits width but too tall. Track it as a candidate if it's the "least overflowing" so far?
+                     # Actually, smaller fonts will naturally overflow less vertically.
+                     # So we just continue to smaller sizes.
+                     if (total_h_px - box_height) < best_fit_height_diff:
+                         best_fit_height_diff = total_h_px - box_height
+                         best_fit_font = test_font
+                         best_fit_lines = test_lines
+                         # best_fit_line_height = size + 4 # Save this if needed, but we re-calc below
+        
+        # If no perfect fit found, use the smallest size or the one that overflowed least
+        if chosen_font is None:
+             # If we have a "best bad fit" (e.g. slight vertical overflow), use it
+             # otherwise default to smallest
              try:
-                 reshaped_text = arabic_reshaper.reshape(text_to_draw)
-                 bidi_text = get_display(reshaped_text, base_dir='R')
-                 wrapped_text = textwrap.wrap(bidi_text, width=25)
-             except Exception as e:
-                 print(f"Arabic processing error: {e}")
-                 wrapped_text = textwrap.wrap(text_to_draw, width=25)
-        else:
-             wrapped_text = textwrap.wrap(text_to_draw, width=25)
+                 chosen_font = ImageFont.truetype(font_path, 10)
+             except:
+                 chosen_font = ImageFont.load_default()
+             chosen_lines = textwrap.wrap(text_to_draw, width=int(box_width/6))
+             line_height = 14
 
-        for i, line in enumerate(wrapped_text):
-            y = int((y1 + y2) / 2) + i * 20
+        # Draw
+        total_block_h = len(chosen_lines) * line_height
+        # Ensure we don't start negative if it overflows vertically
+        start_y = int((y1 + y2 - total_block_h) / 2)
+        
+        # Dynamic clipping or strict centering? 
+        # For now, let's just draw.
+        
+        for i, line in enumerate(chosen_lines):
+            line_to_render = line
+            if is_arabic:
+                 try:
+                     reshaped = arabic_reshaper.reshape(line)
+                     line_to_render = get_display(reshaped, base_dir='R')
+                 except Exception as e:
+                     print(f"Arabic Error: {e}")
             
             try:
-                text_width = draw.textlength(line, font=font)
+                lw = draw.textlength(line_to_render, font=chosen_font)
             except:
-                text_width = draw.textsize(line, font=font)[0]
-                
-            x = int((x1 + x2 - int(text_width)) / 2)
-            draw.text((x,y-20), line, fill=(0,0,0), font=font)
+                try:
+                    lw = draw.textsize(line_to_render, font=chosen_font)[0]
+                except:
+                    lw = 0
+            
+            curr_x = int((x1 + x2 - lw) / 2)
+            curr_y = start_y + (i * line_height)
+            
+            draw.text((curr_x, curr_y), line_to_render, fill=(0,0,0), font=chosen_font)
+            
         değişken += 1
 
     img = np.array(img)
