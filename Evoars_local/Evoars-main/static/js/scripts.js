@@ -708,6 +708,234 @@ document.addEventListener('DOMContentLoaded', function () {
 
     // ... (önceki kodlar aynı kalacak) ...
 
+    // --- REVIEW FLOW VARIABLES & FUNCTIONS ---
+    const reviewModalWrapper = document.getElementById('reviewModalWrapper');
+    const reviewContent = document.getElementById('reviewContent');
+    const submitReviewBtn = document.getElementById('submitReviewBtn');
+    const closeReviewModalButtons = document.querySelectorAll('.closeReviewModal');
+    let currentReviewOperationId = null;
+
+    function handleReviewNeeded(data) {
+        if (loadingIndicator) loadingIndicator.classList.add('hidden');
+        currentReviewOperationId = data.operation_id;
+        if (reviewContent) reviewContent.innerHTML = '';
+
+        if (data.review_data && data.review_data.length > 0) {
+            data.review_data.forEach((item, index) => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'bg-customBlackHover p-4 rounded border border-customBorder';
+
+                const originalTextLabel = document.createElement('label');
+                originalTextLabel.className = 'block text-xs text-gray-500 mb-1';
+                originalTextLabel.textContent = 'Original Text';
+                itemDiv.appendChild(originalTextLabel);
+
+                const originalTextP = document.createElement('p');
+                originalTextP.className = 'text-gray-300 text-sm mb-3 p-2 bg-black/20 rounded';
+                originalTextP.textContent = item.original;
+                itemDiv.appendChild(originalTextP);
+
+                const translatedTextLabel = document.createElement('label');
+                translatedTextLabel.className = 'block text-xs text-gray-500 mb-1';
+                translatedTextLabel.textContent = 'Translated Text (Editable)';
+                itemDiv.appendChild(translatedTextLabel);
+
+                const textarea = document.createElement('textarea');
+                textarea.className = 'w-full bg-customBlack border border-customBorder text-white rounded p-2 text-sm focus:ring-1 focus:ring-primary outline-none transition-all';
+                textarea.rows = 2;
+                textarea.value = item.translated;
+                textarea.dataset.index = index;
+                textarea.dir = 'auto'; // Support RTL automatically
+                itemDiv.appendChild(textarea);
+
+                reviewContent.appendChild(itemDiv);
+            });
+
+            if (reviewModalWrapper) {
+                reviewModalWrapper.style.display = 'flex';
+                if (modalBackdrop) modalBackdrop.style.display = 'block';
+            }
+        } else {
+            // No segments to review? proceeding...
+            submitReview();
+        }
+    }
+
+    async function submitReview() {
+        if (!currentReviewOperationId) return;
+
+        const modifications = [];
+        if (reviewContent) {
+            reviewContent.querySelectorAll('textarea').forEach(textarea => {
+                modifications.push({
+                    index: parseInt(textarea.dataset.index),
+                    text: textarea.value
+                });
+            });
+        }
+
+        if (reviewModalWrapper) reviewModalWrapper.style.display = 'none';
+        if (modalBackdrop) modalBackdrop.style.display = 'none';
+        if (loadingIndicator) loadingIndicator.classList.remove('hidden');
+        if (resultsArea) resultsArea.classList.remove('hidden');
+
+        try {
+            const response = await fetch('/submit_review', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    operation_id: currentReviewOperationId,
+                    modifications: modifications
+                })
+            });
+            if (loadingIndicator) loadingIndicator.classList.add('hidden');
+            const data = await response.json();
+            await handleProcessResponse(response, data);
+
+        } catch (error) {
+            if (loadingIndicator) loadingIndicator.classList.add('hidden');
+            console.error('Review Submit Error:', error);
+            if (resultContent) resultContent.innerHTML = `<p class="text-red-400 text-center py-4">Error submitting review.</p>`;
+        }
+    }
+
+    async function renderResults(data) {
+        if (resultContent) resultContent.innerHTML = '';
+        const processedFileNames = new Set();
+        let previewFilesToShow = [];
+        let directDownloadFilesToShow = [];
+
+        if (data.preview_files && data.preview_files.length > 0) {
+            data.preview_files.forEach(file => {
+                if (!processedFileNames.has(file.name)) {
+                    previewFilesToShow.push(file);
+                    processedFileNames.add(file.name);
+                }
+            });
+        }
+
+        if (data.direct_download_files && data.direct_download_files.length > 0) {
+            data.direct_download_files.forEach(file => {
+                if (!processedFileNames.has(file.name)) {
+                    directDownloadFilesToShow.push(file);
+                    processedFileNames.add(file.name);
+                }
+            });
+        }
+
+        if (previewFilesToShow.length > 0) {
+            const previewTitleEl = document.createElement('h3');
+            previewTitleEl.className = 'text-lg font-medium mb-4 text-center';
+            previewTitleEl.setAttribute('data-translate', 'preview_title');
+            if (resultContent) resultContent.appendChild(previewTitleEl);
+
+            const resultsDisplayContainer = document.createElement('div');
+            const numResults = previewFilesToShow.length;
+            if (numResults === 1) resultsDisplayContainer.className = 'flex justify-center items-start';
+            else if (numResults === 2) resultsDisplayContainer.className = 'grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6';
+            else resultsDisplayContainer.className = 'flex overflow-x-auto space-x-4 pb-4 horizontal-scroll-custom';
+
+            for (const file of previewFilesToShow) {
+                const itemDiv = await createFileDisplayElement(
+                    file.name,
+                    (file.mimetype === 'text/plain' || (file.name && file.name.endsWith('.srt'))) && file.data_url ? atob(file.data_url.split(',')[1]) : null,
+                    file.data_url,
+                    true,
+                    file.mimetype,
+                    true
+                );
+                resultsDisplayContainer.appendChild(itemDiv);
+            }
+            if (resultContent) resultContent.appendChild(resultsDisplayContainer);
+        }
+
+        if (directDownloadFilesToShow.length > 0) {
+            const directDownloadsTitle = document.createElement('h3');
+            const marginTopClassForDirect = previewFilesToShow.length > 0 ? 'mt-8 pt-6 border-t border-customBorder' : 'mt-6';
+            directDownloadsTitle.className = `text-lg font-medium mb-4 text-center ${marginTopClassForDirect}`;
+            directDownloadsTitle.textContent = "Downloadable Output Files";
+            if (resultContent) resultContent.appendChild(directDownloadsTitle);
+
+            const directDownloadsContainer = document.createElement('div');
+            const numDirect = directDownloadFilesToShow.length;
+            if (numDirect === 1) directDownloadsContainer.className = 'flex justify-center items-start';
+            else if (numDirect === 2) directDownloadsContainer.className = 'grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6';
+            else directDownloadsContainer.className = 'flex overflow-x-auto space-x-4 pb-4 horizontal-scroll-custom';
+
+            for (const file of directDownloadFilesToShow) {
+                const itemDiv = await createFileDisplayElement(
+                    file.name,
+                    null,
+                    file.download_url,
+                    true,
+                    file.mimetype,
+                    true
+                );
+                directDownloadsContainer.appendChild(itemDiv);
+            }
+            if (resultContent) resultContent.appendChild(directDownloadsContainer);
+        }
+
+        if (data.zip_download_url) {
+            const zipDiv = document.createElement('div');
+            const marginTopClassForZip = (previewFilesToShow.length > 0 || directDownloadFilesToShow.length > 0)
+                ? 'mt-8 pt-6 border-t border-customBorder' : 'mt-6';
+            zipDiv.className = `flex flex-col items-center ${marginTopClassForZip}`;
+
+            const zipTitle = document.createElement('h4');
+            zipTitle.className = 'text-lg font-semibold mb-3';
+            zipTitle.setAttribute('data-translate', 'download_all_zip_title');
+            zipDiv.appendChild(zipTitle);
+
+            const zipLink = document.createElement('a');
+            zipLink.href = data.zip_download_url;
+            zipLink.className = 'bg-lightGreen hover:bg-lightGreenHover text-white py-3 px-8 rounded !rounded-button font-medium flex items-center gap-2 text-base';
+            zipLink.download = `results_${currentOperation || 'files'}.zip`;
+            zipLink.innerHTML = `<i class="ri-folder-zip-line ri-lg"></i> <span data-translate="download_results_btn"></span>`;
+            zipDiv.appendChild(zipLink);
+            if (resultContent) resultContent.appendChild(zipDiv);
+        }
+
+        if (previewFilesToShow.length === 0 && directDownloadFilesToShow.length === 0 && !data.zip_download_url) {
+            if (resultContent) resultContent.innerHTML = `<p class="text-yellow-400 text-center py-4" data-translate="no_results_to_display"></p>`;
+        }
+
+        // Re-apply translations for newly created elements
+        if (typeof window.applyTranslationsGlobally === "function") {
+            window.applyTranslationsGlobally(localStorage.getItem('preferredLanguage') || 'en');
+        }
+    }
+
+    async function handleProcessResponse(response, data) {
+        const preferredLang = localStorage.getItem('preferredLanguage') || 'en';
+        if (response.ok) {
+            if (data.status === 'review_needed') {
+                handleReviewNeeded(data);
+            } else if (data.status === 'ready') {
+                await renderResults(data);
+                loadAndRenderHistory();
+            } else {
+                const errorMessage = data.message || 'Unknown status received.';
+                if (resultContent) resultContent.innerHTML = `<p class="text-red-400 text-center py-4">${errorMessage}</p>`;
+            }
+        } else {
+            const errorMessage = data.message || (window.translations[preferredLang]?.error_processing_file || 'Error processing file: ') + ((typeof data.detail === 'string' ? data.detail : '') || 'Unknown error');
+            if (resultContent) resultContent.innerHTML = `<p class="text-red-400 text-center py-4">${errorMessage}</p>`;
+        }
+    }
+
+    if (submitReviewBtn) submitReviewBtn.addEventListener('click', submitReview);
+    closeReviewModalButtons.forEach(btn => btn.addEventListener('click', () => {
+        if (reviewModalWrapper) reviewModalWrapper.style.display = 'none';
+        if (modalBackdrop && !Object.values(window.regularModalWrappers).some(m => m?.style.display === 'flex')) modalBackdrop.style.display = 'none';
+        if (resultContent && resultContent.innerHTML === '') { // If cancelled before any result
+            if (loadingIndicator) loadingIndicator.classList.add('hidden');
+            if (resultsArea) resultsArea.classList.add('hidden');
+            if (processSelectionDiv) processSelectionDiv.classList.remove('hidden');
+        }
+    }));
+
+
     if (submitBtn) {
         submitBtn.addEventListener('click', async function () {
             const preferredLang = localStorage.getItem('preferredLanguage') || 'en';
@@ -724,6 +952,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
             const formData = new FormData();
             formData.append('operation', currentOperation);
+
+            // Check review mode
+            const reviewModeCheckbox = currentFormElement.querySelector('input[name="review_mode"]');
+            if (reviewModeCheckbox && reviewModeCheckbox.checked) {
+                formData.append('review_mode', 'true');
+            }
+
             // ... (formData doldurma kısmı aynı) ...
             const dubbingTypeRadio = currentFormElement.querySelector('input[name="dubbing-type"]:checked');
 
@@ -765,7 +1000,10 @@ document.addEventListener('DOMContentLoaded', function () {
                         (inputEl.value.trim() !== '' && inputEl.type !== 'select-one' && inputEl.type !== 'radio')
                     ) {
                         if (!((inputEl.name === 'source-lang' || inputEl.name === 'target-lang') && currentOperation === 'dubbing')) {
-                            formData.append(inputEl.name, inputEl.value);
+                            // review_mode is already handled
+                            if (inputEl.name !== 'review_mode') {
+                                formData.append(inputEl.name, inputEl.value);
+                            }
                         }
                     }
                 }
@@ -777,125 +1015,13 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (loadingIndicator) loadingIndicator.classList.add('hidden');
                 const data = await response.json();
 
-                if (response.ok && data.status === 'ready') {
-                    resultContent.innerHTML = '';
-                    const processedFileNames = new Set();
-                    let previewFilesToShow = [];
-                    let directDownloadFilesToShow = [];
+                await handleProcessResponse(response, data);
 
-                    // Önce hangi dosyaların hangi listede gösterileceğini belirle
-                    if (data.preview_files && data.preview_files.length > 0) {
-                        data.preview_files.forEach(file => {
-                            if (!processedFileNames.has(file.name)) {
-                                previewFilesToShow.push(file);
-                                processedFileNames.add(file.name);
-                            }
-                        });
-                    }
-
-                    if (data.direct_download_files && data.direct_download_files.length > 0) {
-                        data.direct_download_files.forEach(file => {
-                            if (!processedFileNames.has(file.name)) {
-                                directDownloadFilesToShow.push(file);
-                                processedFileNames.add(file.name); // Bu aslında gereksiz çünkü set zaten benzersiz tutar
-                                // ama zararı yok, mantığı netleştirir.
-                            }
-                        });
-                    }
-
-                    // --- ÖNİZLEME DOSYALARI ---
-                    if (previewFilesToShow.length > 0) {
-                        const previewTitleEl = document.createElement('h3');
-                        previewTitleEl.className = 'text-lg font-medium mb-4 text-center';
-                        previewTitleEl.setAttribute('data-translate', 'preview_title');
-                        resultContent.appendChild(previewTitleEl);
-
-                        const resultsDisplayContainer = document.createElement('div');
-                        const numResults = previewFilesToShow.length; // Gösterilecek gerçek sayı
-                        if (numResults === 1) resultsDisplayContainer.className = 'flex justify-center items-start';
-                        else if (numResults === 2) resultsDisplayContainer.className = 'grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6';
-                        else resultsDisplayContainer.className = 'flex overflow-x-auto space-x-4 pb-4 horizontal-scroll-custom';
-
-                        for (const file of previewFilesToShow) {
-                            const itemDiv = await createFileDisplayElement(
-                                file.name,
-                                (file.mimetype === 'text/plain' || (file.name && file.name.endsWith('.srt'))) && file.data_url ? atob(file.data_url.split(',')[1]) : null,
-                                file.data_url,
-                                true,
-                                file.mimetype,
-                                true // isInputOrOutputItem
-                            );
-                            resultsDisplayContainer.appendChild(itemDiv);
-                        }
-                        resultContent.appendChild(resultsDisplayContainer);
-                    }
-
-                    // --- DOĞRUDAN İNDİRİLEBİLİR DOSYALAR ---
-                    if (directDownloadFilesToShow.length > 0) {
-                        const directDownloadsTitle = document.createElement('h3');
-                        // Eğer preview dosyaları da varsa, araya bir ayırıcı ve boşluk koy
-                        const marginTopClassForDirect = previewFilesToShow.length > 0 ? 'mt-8 pt-6 border-t border-customBorder' : 'mt-6';
-                        directDownloadsTitle.className = `text-lg font-medium mb-4 text-center ${marginTopClassForDirect}`;
-                        directDownloadsTitle.textContent = "Downloadable Output Files"; // Çeviri anahtarı kullan
-                        resultContent.appendChild(directDownloadsTitle);
-
-                        const directDownloadsContainer = document.createElement('div');
-                        const numDirect = directDownloadFilesToShow.length; // Gösterilecek gerçek sayı
-                        if (numDirect === 1) directDownloadsContainer.className = 'flex justify-center items-start';
-                        else if (numDirect === 2) directDownloadsContainer.className = 'grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-6';
-                        else directDownloadsContainer.className = 'flex overflow-x-auto space-x-4 pb-4 horizontal-scroll-custom';
-
-                        for (const file of directDownloadFilesToShow) {
-                            const itemDiv = await createFileDisplayElement(
-                                file.name,
-                                null,
-                                file.download_url,
-                                true,
-                                file.mimetype,
-                                true // isInputOrOutputItem
-                            );
-                            directDownloadsContainer.appendChild(itemDiv);
-                        }
-                        resultContent.appendChild(directDownloadsContainer);
-                    }
-
-                    // --- ZIP İNDİRME BUTONU ---
-                    if (data.zip_download_url) {
-                        const zipDiv = document.createElement('div');
-                        const marginTopClassForZip = (previewFilesToShow.length > 0 || directDownloadFilesToShow.length > 0)
-                            ? 'mt-8 pt-6 border-t border-customBorder' : 'mt-6';
-                        zipDiv.className = `flex flex-col items-center ${marginTopClassForZip}`;
-
-                        const zipTitle = document.createElement('h4');
-                        zipTitle.className = 'text-lg font-semibold mb-3';
-                        zipTitle.setAttribute('data-translate', 'download_all_zip_title');
-                        zipDiv.appendChild(zipTitle);
-
-                        const zipLink = document.createElement('a');
-                        zipLink.href = data.zip_download_url;
-                        zipLink.className = 'bg-lightGreen hover:bg-lightGreenHover text-white py-3 px-8 rounded !rounded-button font-medium flex items-center gap-2 text-base';
-                        zipLink.download = `results_${currentOperation || 'files'}.zip`;
-                        zipLink.innerHTML = `<i class="ri-folder-zip-line ri-lg"></i> <span data-translate="download_results_btn"></span>`;
-                        zipDiv.appendChild(zipLink);
-                        resultContent.appendChild(zipDiv);
-                    }
-
-                    if (previewFilesToShow.length === 0 && directDownloadFilesToShow.length === 0 && !data.zip_download_url) {
-                        resultContent.innerHTML = `<p class="text-yellow-400 text-center py-4" data-translate="no_results_to_display"></p>`;
-                    }
-
-                } else {
-                    const errorMessage = data.message || (window.translations[preferredLang]?.error_processing_file || 'Error processing file: ') + ((typeof data.detail === 'string' ? data.detail : '') || 'Unknown error');
-                    resultContent.innerHTML = `<p class="text-red-400 text-center py-4">${errorMessage}</p>`;
-                }
             } catch (error) {
-                // ... (catch bloğu aynı)
                 if (loadingIndicator) loadingIndicator.classList.add('hidden');
                 console.error('Fetch Error:', error);
                 const preferredLangError = localStorage.getItem('preferredLanguage') || 'en';
-                resultContent.innerHTML = `<p class="text-red-400 text-center py-4">${window.translations[preferredLangError]?.error_network || 'Network error or server unreachable.'}</p>`;
-            } finally {
-                // ... (finally bloğu aynı)
+                if (resultContent) resultContent.innerHTML = `<p class="text-red-400 text-center py-4">${window.translations[preferredLangError]?.error_network || 'Network error or server unreachable.'}</p>`;
                 loadAndRenderHistory();
                 if (typeof window.applyTranslationsGlobally === "function") {
                     window.applyTranslationsGlobally(localStorage.getItem('preferredLanguage') || 'en');

@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu20.04
+FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -15,10 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsm6 \
     libxext6 \
     libxrender-dev \
-    && add-apt-repository ppa:deadsnakes/ppa && \
-    apt-get update && \
-    apt-get install -y python3.10 python3.10-dev python3.10-distutils && \
-    curl -sS https://bootstrap.pypa.io/get-pip.py | python3.10 && \
+    python3.10 \
+    python3.10-dev \
+    python3.10-distutils \
+    && curl -sS https://bootstrap.pypa.io/get-pip.py | python3.10 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN python3.10 -m pip install --upgrade pip
@@ -60,7 +60,7 @@ RUN mkdir -p \
 COPY requirements.txt .
 
 # Bağımlılıkları kur
-RUN python3.10 -m pip install --no-cache-dir -r requirements.txt
+RUN python3.10 -m pip install --no-cache-dir --ignore-installed -r requirements.txt
 
 # Proje dosyalarını kopyala
 COPY --chown=user:user . /home/user/app/

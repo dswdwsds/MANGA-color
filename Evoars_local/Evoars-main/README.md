@@ -1,3 +1,13 @@
+---
+title: Evoars
+emoji: 🎨
+colorFrom: blue
+colorTo: purple
+sdk: docker
+pinned: false
+app_port: 7860
+---
+
 <div align="center">
 
 # Evoars: Advanced AI Media Processing Platform

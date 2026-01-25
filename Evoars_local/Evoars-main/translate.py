@@ -181,19 +181,18 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
 
         text_to_draw = dizi2[değişken]
         
+        if is_arabic:
+            # For Arabic, we reshape the entire text first to ensure proper joining
+            # then we wrap the reshaped text or wrap the logical text.
+            # Wrapping logical text is safer for word order.
+            pass
+
         # Dynamic Font Sizing & Wrapping Logic
         chosen_font = None
         chosen_lines = []
         line_height = 0
         
-        # Best fit tracking
-        best_fit_font = None
-        best_fit_lines = []
-        best_fit_height_diff = float('inf')
-        
-        # Iterate sizes downwards strictly
-        # Amiri needs slightly larger sizes to be readable, but we must fit.
-        font_sizes = list(range(40, 7, -2)) # 40 down to 8
+        font_sizes = list(range(40, 7, -2))
         
         for size in font_sizes:
             try:
@@ -201,43 +200,44 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
             except:
                 test_font = ImageFont.load_default()
             
-            # Heuristic for wrap width
-            char_width_factor = 0.5 if is_arabic else 0.5 
+            char_width_factor = 0.5 
             estimated_char_width = size * char_width_factor
             wrap_cols = int(box_width / estimated_char_width)
             if wrap_cols < 1: wrap_cols = 1
             
+            # Wrap logical text
             test_lines = textwrap.wrap(text_to_draw, width=wrap_cols)
             
-            # STRICT Vertical Check
-            # Amiri needs line height ~ size * 1.5 usually? Let's use size + 8 to be safe/readable
             current_line_height = size + 6 
             total_h_px = len(test_lines) * current_line_height
             
             if total_h_px > box_height:
-                # Too tall, skip to smaller size immediately
                 continue
             
-            # If vertical fits, check horizontal
             fits_width = True
+            processed_test_lines = []
             for line in test_lines:
-                line_check = line
+                line_to_check = line
                 if is_arabic:
                     try:
-                         line_check = get_display(arabic_reshaper.reshape(line), base_dir='R')
+                        # Reshape and Bidi EACH line to fit the box
+                        reshaped = arabic_reshaper.reshape(line)
+                        line_to_check = get_display(reshaped, base_dir='R')
                     except: pass
                 
                 try:
-                    w = draw.textlength(line_check, font=test_font)
+                    w = draw.textlength(line_to_check, font=test_font)
                 except:
-                    w = size * len(line_check)
+                    w = size * len(line_to_check)
+                
                 if w > box_width:
                     fits_width = False
                     break
+                processed_test_lines.append(line_to_check)
             
             if fits_width:
                  chosen_font = test_font
-                 chosen_lines = test_lines
+                 chosen_lines = processed_test_lines # Already bidi-ed
                  line_height = current_line_height
                  break
 
@@ -246,21 +246,22 @@ def beyaz_kare_olustur(dizi, dizi2, img, simple_lama):
                  chosen_font = ImageFont.truetype(font_path, 10)
              except:
                  chosen_font = ImageFont.load_default()
-             chosen_lines = textwrap.wrap(text_to_draw, width=int(box_width/6))
+             
+             raw_lines = textwrap.wrap(text_to_draw, width=max(1, int(box_width/6)))
+             chosen_lines = []
+             for rl in raw_lines:
+                 if is_arabic:
+                     try:
+                         chosen_lines.append(get_display(arabic_reshaper.reshape(rl), base_dir='R'))
+                     except: chosen_lines.append(rl)
+                 else:
+                     chosen_lines.append(rl)
              line_height = 14
 
         total_block_h = len(chosen_lines) * line_height
         start_y = int((y1 + y2 - total_block_h) / 2)
         
-        for i, line in enumerate(chosen_lines):
-            line_to_render = line
-            if is_arabic:
-                 try:
-                     reshaped = arabic_reshaper.reshape(line)
-                     line_to_render = get_display(reshaped, base_dir='R')
-                 except Exception as e:
-                     print(f"Arabic Error: {e}")
-            
+        for i, line_to_render in enumerate(chosen_lines):
             try:
                 lw = draw.textlength(line_to_render, font=chosen_font)
             except:
@@ -337,7 +338,7 @@ def main(in_memory_files,  source_lang, target_lang):
         dizi = reader.ocr(img_for_ocr)
         dizi = [item for sublist in dizi if sublist is not None for item in sublist]
 
-        if len(dizi) > 1:
+        if len(dizi) > 0:
             kordinatlar = [orta_nokta_bul(i[0]) for i in dizi]
             kordinatlar_ = kordinatlar.copy()
 
@@ -372,4 +373,157 @@ def main(in_memory_files,  source_lang, target_lang):
             _, encoded_img = cv2.imencode(f'.{file_extension}', resim)
             results[resim_adı] = encoded_img.tobytes()
 
+    return results
+
+def scan_for_review(in_memory_files, source_lang, target_lang):
+    review_data = [] # List of {id, original, translated, image_name}
+    state_data = {} # {image_name: {coords: [], original_texts: [], translated_texts: [], img_shape: ...}}
+    
+    # Init OCR and Translator
+    translator = None # Dynamic
+    ocr_lang = PADDLE_LANG_MAP.get(source_lang, 'en')
+    reader = PaddleOCR(lang=ocr_lang, use_angle_cls=True, det_db_thresh=0.3, det_db_box_thresh=0.5)
+    
+    global_text_index = 0
+    
+    for resim_adı, resim_verisi in tqdm(in_memory_files.items(), desc="Scanning for Review", unit="image"):
+        file_bytes = np.frombuffer(resim_verisi, np.uint8)
+        img = cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
+        if len(img.shape) == 2:
+            img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+            
+        img_copy = img.copy()
+        img_for_ocr = img_copy.copy()
+        if len(img_for_ocr.shape) == 3:
+            gray = cv2.cvtColor(img_for_ocr, cv2.COLOR_BGR2GRAY)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            img_for_ocr = clahe.apply(gray)
+
+        dizi = reader.ocr(img_for_ocr)
+        dizi = [item for sublist in dizi if sublist is not None for item in sublist]
+
+        if len(dizi) > 0:
+            kordinatlar = [orta_nokta_bul(i[0]) for i in dizi]
+            kordinatlar_ = kordinatlar.copy() # yedek
+            
+            sonuclar = yakın_kelimeleri_bul(kordinatlar)
+            indexler = indexleri_bul(kordinatlar_, sonuclar)
+            
+            final_coords = []
+            final_translations = []
+            final_originals = []
+            
+            for i in indexler:
+                group_coords = []
+                group_text_parts = []
+                
+                for a in i:
+                    group_coords.append(dizi[a][0])
+                    raw_text = str(dizi[a][1][0])
+                    cleaned_text = clean_ocr_text(raw_text)
+                    group_text_parts.append(cleaned_text)
+                
+                text_to_translate = verileri_düzelt(group_text_parts)
+                translated_text = ""
+                
+                if text_to_translate.strip():
+                    translated_text = translators(text_to_translate, translator, source_lang, target_lang)
+                
+                final_coords.append(group_coords)
+                final_translations.append(translated_text)
+                final_originals.append(text_to_translate)
+                
+                review_data.append({
+                    'id': global_text_index,
+                    'image_name': resim_adı,
+                    'original': text_to_translate,
+                    'translated': translated_text
+                })
+                global_text_index += 1
+            
+            state_data[resim_adı] = {
+                'coords': final_coords,
+                'img_shape': img.shape,
+                # We save translated_texts to use as default if no modification
+                'translated_texts': final_translations 
+            }
+        else:
+             # No text found, but we should keep track of the image to pass it through?
+             # Or just ignore text replacement for it.
+             state_data[resim_adı] = {'coords': [], 'img_shape': img.shape, 'translated_texts': []}
+
+    return review_data, state_data
+
+def render_after_review(in_memory_files, state_data, modifications):
+    # modifications: list of {index, text}
+    # we need to map modifications back to images
+    
+    # Re-construct the translated_texts lists from state + modifications
+    # The ID in modifications corresponds to the order in scan_for_review.
+    # We need to reconstruct that order.
+    
+    # Let's flatten the state structure to match IDs?
+    # Actually, simpler: state_data should preserve the order or we iterate same way?
+    # Dictionary iteration order is insertion order in Python 3.7+.
+    # But it's risky.
+    
+    # Better approach: modifications are passed as a Map or we update the state first.
+    # Let's flatten the state texts linear list to apply mods.
+    
+    all_texts_linear = []
+    # reconstruct linear list in same order as scan
+    for resim_adı in in_memory_files: # Iterate input files to match order
+        if resim_adı in state_data:
+             all_texts_linear.extend([(resim_adı, i) for i in range(len(state_data[resim_adı]['translated_texts']))])
+             
+    # Apply modifications
+    # ID in mod corresponds to index in all_texts_linear
+    mods_map = {m['index']: m['text'] for m in modifications}
+    
+    results = {}
+    simple_lama = SimpleLama()
+    
+    # Update state with new texts
+    # This is getting complicated to map back.
+    # Let's just iterate and pop from linear list?
+    
+    # Let's rebuild the text lists for each image
+    current_global_idx = 0
+    
+    for resim_adı, resim_verisi in tqdm(in_memory_files.items(), desc="Rendering Final", unit="image"):
+        if resim_adı not in state_data:
+            # Just return original if something went wrong or no text was found (and no state saved)
+            # Actually if no text found, we saved empty state.
+            results[resim_adı] = resim_verisi # Return original bytes? 
+            # Wait, main returns encoded bytes.
+            # We should probably at least decode/encode to be consistent or just return generic
+            continue
+            
+        data = state_data[resim_adı]
+        coords = data['coords']
+        old_texts = data['translated_texts']
+        
+        new_texts = []
+        for _ in old_texts:
+            if current_global_idx in mods_map:
+                new_texts.append(mods_map[current_global_idx])
+            else:
+                new_texts.append(old_texts[len(new_texts)]) # Use original translated
+            current_global_idx += 1
+            
+        # Rendering
+        file_bytes = np.frombuffer(resim_verisi, np.uint8)
+        img = cv2.imdecode(file_bytes, cv2.IMREAD_UNCHANGED)
+        if len(img.shape) == 2: img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+        
+        file_extension = resim_adı.split('.')[-1].lower()
+        
+        if len(coords) > 0:
+            resim = beyaz_kare_olustur(coords, new_texts, img, simple_lama)
+            _, encoded_img = cv2.imencode(f'.{file_extension}', resim)
+            results[resim_adı] = encoded_img.tobytes()
+        else:
+            _, encoded_img = cv2.imencode(f'.{file_extension}', img)
+            results[resim_adı] = encoded_img.tobytes()
+            
     return results

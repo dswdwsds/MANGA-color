@@ -411,6 +411,13 @@
                                     </select>
                                 </div>
                             </div>
+                            <div class="mb-4">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" name="review_mode" class="custom-checkbox">
+                                    <span class="text-sm text-gray-300" data-translate="review_mode_label">Review
+                                        Translations</span>
+                                </label>
+                            </div>
 
                             <div class="mb-6">
                                 <div class="file-upload-area">
@@ -448,6 +455,13 @@
                                         class="w-full bg-customBlack border border-customBorder text-white rounded py-2 px-3 pr-8 custom-select">
                                     </select>
                                 </div>
+                            </div>
+                            <div class="mb-4">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" name="review_mode" class="custom-checkbox">
+                                    <span class="text-sm text-gray-300" data-translate="review_mode_label">Review
+                                        Translations</span>
+                                </label>
                             </div>
 
                             <div class="mb-6">
@@ -487,6 +501,13 @@
                                         class="w-full bg-customBlack border border-customBorder text-white rounded py-2 px-3 pr-8 custom-select">
                                     </select>
                                 </div>
+                            </div>
+                            <div class="mb-4">
+                                <label class="flex items-center gap-2 cursor-pointer">
+                                    <input type="checkbox" name="review_mode" class="custom-checkbox">
+                                    <span class="text-sm text-gray-300" data-translate="review_mode_label">Review
+                                        Translations</span>
+                                </label>
                             </div>
 
                             <div class="mb-6">
@@ -973,6 +994,35 @@
                 <i class="ri-close-line ri-xl"></i> </button>
             <div class="flex-grow flex items-center justify-center overflow-hidden p-2"> <img id="zoomedImage" src=""
                     alt="Zoomed Image" class="max-w-full max-h-full object-contain block select-none" /> </div>
+        </div>
+    </div>
+
+    <!-- Review Modal -->
+    <div id="reviewModalWrapper" class="modal-wrapper z-[80]">
+        <div id="reviewModal"
+            class="modal-content w-full max-w-4xl bg-customBlack rounded-lg shadow-xl p-6 animate-fadeIn max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center mb-6 flex-shrink-0">
+                <h3 class="text-xl font-semibold" data-translate="review_modal_title">Review Translations</h3>
+                <button type="button"
+                    class="closeReviewModal w-8 h-8 flex items-center justify-center text-gray-400 hover:text-white">
+                    <i class="ri-close-line ri-lg"></i>
+                </button>
+            </div>
+
+            <div id="reviewContent" class="flex-grow overflow-y-auto pr-2 mb-6 space-y-6">
+                <!-- content populated by js -->
+            </div>
+
+            <div class="flex-shrink-0 pt-4 border-t border-customBorder flex justify-end gap-3">
+                <button type="button"
+                    class="closeReviewModal px-4 py-2 rounded text-gray-300 hover:text-white hover:bg-white/10 transition-colors"
+                    data-translate="cancel_btn">Cancel</button>
+                <button id="submitReviewBtn" type="button"
+                    class="bg-primary hover:bg-red-700 text-white px-6 py-2 rounded !rounded-button font-medium flex items-center gap-2">
+                    <span data-translate="continue_btn">Continue</span>
+                    <i class="ri-arrow-right-line"></i>
+                </button>
+            </div>
         </div>
     </div>
 

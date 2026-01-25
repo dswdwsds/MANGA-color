@@ -172,3 +172,106 @@ def main(in_memory_files, source_lang, target_lang):
                 logging.error(f"Error during cleanup of {temp_processing_dir}: {e_cleanup}")
                 
     return results
+
+def scan_for_review(in_memory_files, source_lang, target_lang):
+    review_data = []
+    state_data = {}
+    
+    video_filename = None
+    video_data = None
+    for fname, fdata in in_memory_files.items():
+        if fname.lower().endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm')):
+            video_filename = fname
+            video_data = fdata
+            break
+            
+    if not video_filename:
+        return [], {} # No video found
+        
+    base_name, video_ext_with_dot = os.path.splitext(video_filename)
+    video_ext = video_ext_with_dot[1:] if video_ext_with_dot else "tmp"
+    
+    session_id = uuid.uuid4().hex
+    temp_processing_dir = os.path.join("/tmp", "subtitle_processing_review", session_id)
+    
+    translator = None
+    
+    try:
+        if not os.path.exists(temp_processing_dir):
+            os.makedirs(temp_processing_dir, exist_ok=True)
+            
+        temp_video_path = os.path.join(temp_processing_dir, f"temp_video.{video_ext}")
+        temp_audio_path = os.path.join(temp_processing_dir, "audio.wav")
+        
+        with open(temp_video_path, 'wb') as f:
+            f.write(video_data)
+            
+        extract_audio_from_video(temp_video_path, temp_audio_path)
+        segments = transcribe_audio_with_whisper(temp_audio_path)
+        
+        # Prepare review data
+        for idx, segment in enumerate(segments):
+            start = segment['start']
+            end = segment['end']
+            text = segment.get('text', '').strip()
+            
+            translated_text = text
+            if text:
+                translated_text = translators(text, translator, source_lang, target_lang)
+            
+            # Update segment with translation for default state
+            # But for review, we want both original and translated display
+            
+            review_data.append({
+                'id': idx,
+                'image_name': video_filename + f" [{format_time(start)} --> {format_time(end)}]", # Context info
+                'original': text,
+                'translated': translated_text,
+                'start': start,
+                'end': end
+            })
+            
+        state_data['segments'] = review_data # Store the processed review data directly as state to reuse timestamps
+        state_data['filename'] = base_name
+        
+    except Exception as e:
+        logging.error(f"Error during scan_for_review: {e}")
+        raise e
+    finally:
+        if os.path.exists(temp_processing_dir):
+            try:
+                if os.path.exists(temp_video_path): os.remove(temp_video_path)
+                if os.path.exists(temp_audio_path): os.remove(temp_audio_path)
+                os.rmdir(temp_processing_dir)
+            except: pass
+            
+    return review_data, state_data
+
+def render_after_review(in_memory_files, state_data, modifications):
+    # in_memory_files is not strictly needed if we have segments with timestamps in state_data
+    # But for consistency with interface we keep it.
+    
+    segments = state_data.get('segments', [])
+    base_name = state_data.get('filename', 'subtitle')
+    
+    mods_map = {m['index']: m['text'] for m in modifications}
+    
+    srt_content = io.StringIO()
+    
+    for idx, segment in enumerate(segments):
+        start_time = format_time(segment['start'])
+        end_time = format_time(segment['end'])
+        
+        final_text = segment['translated'] # Default
+        if idx in mods_map:
+            final_text = mods_map[idx]
+            
+        srt_content.write(f"{idx + 1}\n")
+        srt_content.write(f"{start_time} --> {end_time}\n")
+        srt_content.write(f"{final_text}\n\n")
+        
+    results = {}
+    output_srt_filename = f"{base_name}.srt"
+    results[output_srt_filename] = srt_content.getvalue().encode("utf-8-sig")
+    
+    return results

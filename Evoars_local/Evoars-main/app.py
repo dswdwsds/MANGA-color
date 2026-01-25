@@ -3,7 +3,7 @@ import zipfile
 import logging
 import base64
 import mimetypes
-import re # Regular expression modülünü import edin
+import re 
 from flask import Flask, render_template, request, send_file, jsonify, url_for, g
 from werkzeug.utils import secure_filename
 import shutil
@@ -13,6 +13,10 @@ import json
 from datetime import datetime
 import psutil
 import threading
+import pickle
+import translate 
+import colorize_and_translate
+import subtitles
 
 try:
     from main import main
@@ -90,9 +94,9 @@ def init_db():
 init_db()
 
 def is_safe_path_component(component_string):
-    if not isinstance(component_string, str): # Ekstra güvenlik: Sadece stringleri işle
+    if not isinstance(component_string, str): 
         return False
-    if ".." in component_string: # Path traversal engelleme
+    if ".." in component_string: 
         return False
 
     return bool(component_string and re.match(r'^[a-zA-Z0-9_.-]+$', component_string))
@@ -122,7 +126,6 @@ def process_files():
     global active_users_count
     logging.info("Process endpoint called")
     
-    # Increment active users
     with active_users_lock:
         active_users_count += 1
     
@@ -136,8 +139,9 @@ def process_files():
         dubbing_type = request.form.get('dubbing-type')
         dubbing_lang = request.form.get('dubbing-lang')
         manga_text = request.form.get('manga_text')
+        review_mode = request.form.get('review_mode') == 'true'
 
-        logging.debug(f"Form Data: Op: {operation}, SrcLang: {source_lang}, TrgLang: {target_lang}, DubType: {dubbing_type}, DubLang: {dubbing_lang}, MangaTxtLen: {len(manga_text) if manga_text else 0}")
+        logging.debug(f"Form Data: Op: {operation}, SrcLang: {source_lang}, TrgLang: {target_lang}, DubType: {dubbing_type}, DubLang: {dubbing_lang}, Review: {review_mode}")
 
         current_op_history_path = os.path.join(HISTORY_FILES_BASE, operation_id)
         current_op_inputs_path = os.path.join(current_op_history_path, "inputs")
@@ -160,7 +164,7 @@ def process_files():
                 for file_storage in uploaded_list:
                     if file_storage and file_storage.filename:
                         original_filename = secure_filename(file_storage.filename)
-                        if not original_filename: # secure_filename boş string dönebilir
+                        if not original_filename:
                             logging.warning(f"Skipping file with potentially unsafe original name from attribute {name_attr}")
                             continue
                         file_bytes = file_storage.read()
@@ -179,28 +183,55 @@ def process_files():
                         ''', (operation_id, original_filename, stored_input_filename_history, mimetype_in or 'application/octet-stream'))
                         logging.debug(f"Saved input '{original_filename}' to history as '{stored_input_filename_history}'")
         
-        # تحرير قفل قاعدة البيانات قبل البدء في المعالجة الطويلة
         db.commit()
         
+        results_dict = {}
+        process_status = "pending"
+        review_data_response = None
+
         try:
-            logging.info(f"Calling main processing function for operation: {operation}")
-            results_dict = main(
-                in_memory_files=in_memory_files, operation=operation, source_lang=source_lang,
-                target_lang=target_lang, dubbing_type=dubbing_type, dubbing_lang=dubbing_lang,
-                manga_text=manga_text
-            )
-            logging.info(f"Main function returned {len(results_dict if results_dict else [])} items in results_dict.")
-            process_status = "success"
+            if review_mode and operation in ['translate', 'both', 'subtitle']:
+                logging.info(f"Starting review scan for operation: {operation}")
+                
+                state_data = {}
+                review_data = []
+
+                if operation == 'translate':
+                    review_data, state_data = translate.scan_for_review(in_memory_files, source_lang, target_lang)
+                elif operation == 'both':
+                    review_data, state_data = colorize_and_translate.scan_for_review(in_memory_files, source_lang, target_lang)
+                elif operation == 'subtitle':
+                    review_data, state_data = subtitles.scan_for_review(in_memory_files, source_lang, target_lang)
+                
+                # Save state
+                state_data['operation_type'] = operation 
+                
+                state_path = os.path.join(current_op_history_path, 'state.pkl')
+                with open(state_path, 'wb') as f:
+                    pickle.dump(state_data, f)
+                
+                process_status = 'review_needed'
+                review_data_response = review_data
+                logging.info("Review scan completed.")
+            else:
+                logging.info(f"Calling main processing function for operation: {operation}")
+                results_dict = main(
+                    in_memory_files=in_memory_files, operation=operation, source_lang=source_lang,
+                    target_lang=target_lang, dubbing_type=dubbing_type, dubbing_lang=dubbing_lang,
+                    manga_text=manga_text
+                )
+                logging.info(f"Main function returned {len(results_dict if results_dict else [])} items in results_dict.")
+                process_status = "success"
+                
         except Exception as e:
-            logging.error(f"Error during 'main' processing: {str(e)}", exc_info=True)
+            logging.error(f"Error during processing: {str(e)}", exc_info=True)
             process_status = "failed"
             results_dict = {"error_message.txt": f"Processing error: {str(e)}".encode()}
 
-        if not results_dict or not isinstance(results_dict, dict):
+        if (not results_dict or not isinstance(results_dict, dict)) and process_status == "success":
             logging.warning(f"Processing returned no results or unexpected format for operation '{operation}'.")
-            if process_status != "failed": # Eğer zaten hata yüzünden failed değilse
-                process_status = "failed"
-                results_dict = {"error_message.txt": b"Processing returned empty or invalid result."}
+            process_status = "failed"
+            results_dict = {"error_message.txt": b"Processing returned empty or invalid result."}
 
         operation_name_map_py = {
             'colorize': 'Colorize', 'translate': 'Translate', 'both': 'Colorize & Translate',
@@ -213,86 +244,89 @@ def process_files():
         valid_results_for_zip = {}
         zip_output_filename_for_db = None
 
-        for filename_out, content_or_path in (results_dict.items() if results_dict else []):
-            output_file_bytes = None
-            original_output_filename = secure_filename(filename_out)
-            if not original_output_filename:
-                logging.warning(f"Skipping output file with potentially unsafe original name: {filename_out}")
-                continue
-
-            if isinstance(content_or_path, bytes):
-                output_file_bytes = content_or_path
-            elif isinstance(content_or_path, str) and os.path.exists(content_or_path):
-                try:
-                    with open(content_or_path, 'rb') as f_path_read:
-                        output_file_bytes = f_path_read.read()
-                    
-                    # UPLOAD_FOLDER'a kopyalama (direct download için)
-                    destination_path_in_uploads = os.path.join(UPLOAD_FOLDER, original_output_filename)
-                    shutil.copy(content_or_path, destination_path_in_uploads)
-                    download_url = url_for('download_processed_file', filename=original_output_filename, _external=True)
-                    mimetype_for_direct, _ = mimetypes.guess_type(original_output_filename)
-                    direct_download_files.append({
-                        "name": original_output_filename, "download_url": download_url,
-                        "mimetype": mimetype_for_direct or 'application/octet-stream'
-                    })
-                except Exception as e_read_path:
-                    logging.error(f"Error reading/copying output file from path {content_or_path} for {original_output_filename}: {e_read_path}")
+        if process_status == "success":
+            for filename_out, content_or_path in (results_dict.items() if results_dict else []):
+                output_file_bytes = None
+                original_output_filename = secure_filename(filename_out)
+                if not original_output_filename:
                     continue
-            else:
-                logging.warning(f"Unsupported output type for {original_output_filename}: {type(content_or_path)}, value: {str(content_or_path)[:100]}")
-                continue
 
-            if output_file_bytes:
-                valid_results_for_zip[original_output_filename] = output_file_bytes
-                stored_output_filename_history = f"output_{uuid.uuid4()}_{original_output_filename}"
-                stored_output_path_history = os.path.join(current_op_outputs_path, stored_output_filename_history)
-                with open(stored_output_path_history, 'wb') as f_hist_out:
-                    f_hist_out.write(output_file_bytes)
+                if isinstance(content_or_path, bytes):
+                    output_file_bytes = content_or_path
+                elif isinstance(content_or_path, str) and os.path.exists(content_or_path):
+                    try:
+                        with open(content_or_path, 'rb') as f_path_read:
+                            output_file_bytes = f_path_read.read()
+                        
+                        destination_path_in_uploads = os.path.join(UPLOAD_FOLDER, original_output_filename)
+                        shutil.copy(content_or_path, destination_path_in_uploads)
+                        download_url = url_for('download_processed_file', filename=original_output_filename, _external=True)
+                        mimetype_for_direct, _ = mimetypes.guess_type(original_output_filename)
+                        direct_download_files.append({
+                            "name": original_output_filename, "download_url": download_url,
+                            "mimetype": mimetype_for_direct or 'application/octet-stream'
+                        })
+                    except Exception as e_read_path:
+                        logging.error(f"Error reading/copying output file {original_output_filename}: {e_read_path}")
+                        continue
+                else:
+                    continue
 
-                mimetype_out, _ = mimetypes.guess_type(original_output_filename)
-                if process_status == "success":
+                if output_file_bytes:
+                    valid_results_for_zip[original_output_filename] = output_file_bytes
+                    stored_output_filename_history = f"output_{uuid.uuid4()}_{original_output_filename}"
+                    stored_output_path_history = os.path.join(current_op_outputs_path, stored_output_filename_history)
+                    with open(stored_output_path_history, 'wb') as f_hist_out:
+                        f_hist_out.write(output_file_bytes)
+
+                    mimetype_out, _ = mimetypes.guess_type(original_output_filename)
                     cursor.execute('''
                         INSERT INTO operation_files (operation_id, file_type, original_filename, stored_filename, mimetype)
                         VALUES (?, 'output', ?, ?, ?)
                     ''', (operation_id, original_output_filename, stored_output_filename_history, mimetype_out or 'application/octet-stream'))
-                    logging.debug(f"Saved output '{original_output_filename}' to history as '{stored_output_filename_history}'")
 
-                mimetype_preview = mimetype_out or 'application/octet-stream'
-                if mimetype_preview.startswith(('image/', 'video/', 'audio/')) or mimetype_preview == 'text/plain' or original_output_filename.endswith(('.srt', '.txt', '.json')):
-                    try:
-                        base64_content = base64.b64encode(output_file_bytes).decode('utf-8')
-                        # Ensure charset is specified for text types to prevent Mojibake
-                        mime_header = mimetype_preview
-                        if mime_header == 'text/plain' or original_output_filename.endswith(('.srt', '.txt', '.json')):
-                             if 'charset=' not in mime_header:
-                                 mime_header += ';charset=utf-8'
-                        
+                    mimetype_preview = mimetype_out or 'application/octet-stream'
+                    
+                    if original_output_filename.lower().endswith('.webp') and (not mimetype_preview or mimetype_preview == 'application/octet-stream'):
+                        mimetype_preview = 'image/webp'
+                    
+                    if mimetype_preview.startswith(('image/', 'video/', 'audio/')) or mimetype_preview == 'text/plain' or original_output_filename.endswith(('.srt', '.txt', '.json', '.webp')):
+                        try:
+                            # Use UTF-8 for text
+                            base64_content = base64.b64encode(output_file_bytes).decode('utf-8')
+                            mime_header = mimetype_preview
+                            if mime_header == 'text/plain' or original_output_filename.endswith(('.srt', '.txt', '.json')):
+                                if 'charset=' not in mime_header:
+                                    mime_header += ';charset=utf-8'
+                            
+                            preview_files_data.append({
+                                "name": original_output_filename, "mimetype": mimetype_preview,
+                                "data_url": f"data:{mime_header};base64,{base64_content}"
+                            })
+                        except: 
+                            preview_files_data.append({
+                                "name": original_output_filename, "mimetype": mimetype_preview,
+                                "data_url": None, "error": "Preview generation failed"
+                            })
+                    else:
                         preview_files_data.append({
                             "name": original_output_filename, "mimetype": mimetype_preview,
-                            "data_url": f"data:{mime_header};base64,{base64_content}"
+                            "data_url": None, "content_length": len(output_file_bytes)
                         })
-                    except Exception as e_b64: logging.error(f"Error base64 encoding for preview '{original_output_filename}': {e_b64}")
-                else:
-                    preview_files_data.append({
-                        "name": original_output_filename, "mimetype": mimetype_preview,
-                        "data_url": None, "content_length": len(output_file_bytes)
-                    })
-        
-        zip_download_url = None
-        if valid_results_for_zip and process_status == "success":
-            op_name_for_zip = str(operation).replace(" ", "_") if operation else "general"
-            zip_filename_short = f'results_{operation_id.split("-")[0]}_{op_name_for_zip}.zip'
-            zip_filepath_uploads = os.path.join(UPLOAD_FOLDER, zip_filename_short)
-            try:
-                with zipfile.ZipFile(zip_filepath_uploads, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
-                    for fn_zip, content_bytes_zip in valid_results_for_zip.items():
-                        zipf.writestr(secure_filename(fn_zip), content_bytes_zip) # ZIP içine de secure_filename ile
-                zip_download_url = url_for('download_file', filename=zip_filename_short, _external=False)
-                zip_output_filename_for_db = zip_filename_short
-                logging.info(f"Generated ZIP download URL: {zip_download_url}")
-            except Exception as e_zip:
-                logging.error(f"Error zipping files: {e_zip}", exc_info=True)
+            
+            zip_download_url = None
+            if valid_results_for_zip:
+                op_name_for_zip = str(operation).replace(" ", "_") if operation else "general"
+                zip_filename_short = f'results_{operation_id.split("-")[0]}_{op_name_for_zip}.zip'
+                zip_filepath_uploads = os.path.join(UPLOAD_FOLDER, zip_filename_short)
+                try:
+                    with zipfile.ZipFile(zip_filepath_uploads, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
+                        for fn_zip, content_bytes_zip in valid_results_for_zip.items():
+                            zipf.writestr(secure_filename(fn_zip), content_bytes_zip) 
+                    zip_download_url = url_for('download_file', filename=zip_filename_short, _external=False)
+                    zip_output_filename_for_db = zip_filename_short
+                except Exception as e_zip:
+                    logging.error(f"Error zipping files: {e_zip}", exc_info=True)
 
         cursor.execute('''
             INSERT INTO operations (id, operation_name, timestamp, status, input_details, output_zip_filename)
@@ -307,15 +341,12 @@ def process_files():
         if len(all_ops_ids_ordered) > MAX_HISTORY_ITEMS_DB:
             ids_to_delete = all_ops_ids_ordered[MAX_HISTORY_ITEMS_DB:]
             for old_op_id in ids_to_delete:
-                logging.info(f"Deleting old history operation: {old_op_id}")
                 cursor.execute("DELETE FROM operations WHERE id = ?", (old_op_id,))
                 old_op_folder_to_delete = os.path.join(HISTORY_FILES_BASE, old_op_id)
                 if os.path.exists(old_op_folder_to_delete):
                     try:
                         shutil.rmtree(old_op_folder_to_delete)
-                        logging.info(f"Deleted history files folder: {old_op_folder_to_delete}")
-                    except Exception as e_rm_hist:
-                        logging.error(f"Error deleting history files folder {old_op_folder_to_delete}: {e_rm_hist}")
+                    except: pass
         db.commit()
 
         if process_status == "failed":
@@ -326,6 +357,13 @@ def process_files():
                 'status': 'error', 'message': error_msg_to_show,
                 'preview_files': preview_files_data
             }), 500
+        
+        if process_status == "review_needed":
+             return jsonify({
+                'status': 'review_needed', 
+                'review_data': review_data_response,
+                'operation_id': operation_id
+            })
 
         return jsonify({
             'status': 'ready', 'preview_files': preview_files_data,
@@ -340,15 +378,13 @@ def process_files():
 def download_file(filename):
     logging.info(f"Download (general zip) endpoint called for file: {filename}")
     safe_filename = secure_filename(filename)
-    if not safe_filename or safe_filename != filename : # Ekstra güvenlik
-        logging.warning(f"Attempt to download potentially unsafe filename (zip): {filename}")
+    if not safe_filename or safe_filename != filename :
         return jsonify({'status': 'error', 'message': 'Invalid filename.'}), 400
     
     file_path = os.path.join(UPLOAD_FOLDER, safe_filename)
     if not safe_filename.endswith(".zip"):
         return jsonify({'status': 'error', 'message': 'Only ZIP files.'}), 400
     if not os.path.exists(file_path) or not os.path.isfile(file_path):
-        logging.error(f"ZIP File not found for download: {file_path}")
         return jsonify({'status': 'error', 'message': 'ZIP File not found.'}), 404
     return send_file(file_path, as_attachment=True)
 
@@ -356,19 +392,15 @@ def download_file(filename):
 def download_processed_file(filename):
     logging.info(f"Download (processed single) endpoint called for file: {filename}")
     safe_filename = secure_filename(filename)
-    if not safe_filename or safe_filename != filename: # Ekstra güvenlik
-        logging.warning(f"Attempt to download potentially unsafe filename (processed): {filename}")
+    if not safe_filename or safe_filename != filename:
         return jsonify({'status': 'error', 'message': 'Invalid filename.'}), 400
 
     file_path = os.path.join(UPLOAD_FOLDER, safe_filename)
     if not os.path.exists(file_path) or not os.path.isfile(file_path):
-        logging.error(f"Processed file not found for download: {file_path}")
         return jsonify({'status': 'error', 'message': 'File not found.'}), 404
     
-    # تحديد mimetype مع charset للملفات النصية
     mimetype_guess, _ = mimetypes.guess_type(filename)
     if filename.endswith(('.srt', '.txt', '.json')):
-        # استخدام mimetype مع charset=utf-8 للملفات النصية
         return send_file(file_path, as_attachment=True, download_name=filename, mimetype='text/plain; charset=utf-8')
     else:
         return send_file(file_path, as_attachment=True, download_name=filename, mimetype=mimetype_guess)
@@ -387,30 +419,34 @@ def get_history_endpoint():
         history_items_raw = cursor.fetchall()
         history_list_for_frontend = []
         for item_raw in history_items_raw:
-            cursor.execute("SELECT original_filename FROM operation_files WHERE operation_id = ? AND file_type = 'input'", (item_raw['id'],))
-            input_files_for_item = [row['original_filename'] for row in cursor.fetchall()]
-            file_name_display = ", ".join(input_files_for_item) if input_files_for_item else "N/A"
-            
-            input_details_text = None
-            if item_raw['input_details']:
-                try:
-                    input_details_json = json.loads(item_raw['input_details'])
-                    input_details_text = input_details_json.get('manga_text')
-                except (json.JSONDecodeError, TypeError):
-                    pass # Hata olursa sessizce geç, file_name_display'e eklenmeyecek
-            
-            if input_details_text:
-                manga_summary = f"Manga: {input_details_text[:20]}..."
-                if file_name_display == "N/A":
-                    file_name_display = manga_summary
-                else:
-                    file_name_display += f"; {manga_summary}"
+            try:
+                cursor.execute("SELECT original_filename FROM operation_files WHERE operation_id = ? AND file_type = 'input'", (item_raw['id'],))
+                input_files_for_item = [row['original_filename'] for row in cursor.fetchall()]
+                file_name_display = ", ".join(input_files_for_item) if input_files_for_item else "N/A"
+                
+                input_details_text = None
+                if item_raw['input_details']:
+                    try:
+                        input_details_json = json.loads(item_raw['input_details'])
+                        input_details_text = input_details_json.get('manga_text')
+                    except (json.JSONDecodeError, TypeError):
+                        pass 
+                
+                if input_details_text:
+                    manga_summary = f"Manga: {input_details_text[:20]}..."
+                    if file_name_display == "N/A":
+                        file_name_display = manga_summary
+                    else:
+                        file_name_display += f"; {manga_summary}"
 
-            history_list_for_frontend.append({
-                'id': item_raw['id'], 'operationName': item_raw['operation_name'],
-                'timestamp': item_raw['timestamp'], 'status': item_raw['status'],
-                'fileName': file_name_display
-            })
+                history_list_for_frontend.append({
+                    'id': item_raw['id'], 'operationName': item_raw['operation_name'],
+                    'timestamp': item_raw['timestamp'], 'status': item_raw['status'],
+                    'fileName': file_name_display
+                })
+            except Exception as e_item:
+                logging.error(f"Error processing history item {item_raw['id']}: {e_item}")
+                continue
         return jsonify(history_list_for_frontend)
     except Exception as e:
         logging.error(f"Error in get_history_endpoint: {e}", exc_info=True)
@@ -423,20 +459,14 @@ def serve_history_file(operation_id, file_type_plural, stored_filename):
         is_safe_path_component(stored_filename) and
         file_type_plural in ['inputs', 'outputs']
     ):
-        logging.warning(f"Invalid component in history file request: op_id='{operation_id}', type='{file_type_plural}', name='{stored_filename}'")
         return "Invalid path component or file type", 400
 
     file_path = os.path.join(HISTORY_FILES_BASE, operation_id, file_type_plural, stored_filename)
     
     if not os.path.abspath(file_path).startswith(os.path.abspath(HISTORY_FILES_BASE)):
-        logging.error(f"Potential path traversal attempt: Resolved path '{os.path.abspath(file_path)}' is outside base '{os.path.abspath(HISTORY_FILES_BASE)}'")
         return "Access denied", 403
 
-
-    logging.debug(f"Attempting to serve history file: {file_path}")
-
     if not os.path.exists(file_path) or not os.path.isfile(file_path):
-        logging.error(f"History file not found: {file_path}")
         return "File not found", 404
     
     try:
@@ -447,13 +477,11 @@ def serve_history_file(operation_id, file_type_plural, stored_filename):
         row = cursor.fetchone()
         
         if not row:
-            logging.error(f"File metadata not found in DB for op_id='{operation_id}', stored_filename='{stored_filename}'")
             return "File metadata not found", 404
 
         download_name_original = row['original_filename']
-        mimetype_original = row['mimetype'] if row['mimetype'] else 'application/octet-stream' # Varsayılan mimetype
+        mimetype_original = row['mimetype'] if row['mimetype'] else 'application/octet-stream' 
 
-        # إضافة charset=utf-8 للملفات النصية
         if download_name_original.endswith(('.srt', '.txt', '.json')):
             mimetype_original = 'text/plain; charset=utf-8'
 
@@ -471,7 +499,6 @@ def get_history_item_details(operation_id):
         operation_details = cursor.fetchone()
 
         if not operation_details:
-            logging.warning(f"Operation not found in DB for ID: {operation_id}")
             return jsonify({'error': 'Operation not found', 'status_code': 404}), 404
 
         cursor.execute("SELECT * FROM operation_files WHERE operation_id = ?", (operation_id,))
@@ -500,8 +527,7 @@ def get_history_item_details(operation_id):
             try:
                 details_json = json.loads(operation_details['input_details'])
                 input_details_text_content = details_json.get('manga_text')
-            except (json.JSONDecodeError, TypeError) as e_json:
-                logging.warning(f"Could not parse input_details JSON for op_id {operation_id}: {e_json}")
+            except (json.JSONDecodeError, TypeError):
                 input_details_text_content = None
 
         overall_zip_url = None
@@ -518,12 +544,132 @@ def get_history_item_details(operation_id):
             'outputs': output_files_list,
             'overall_zip_download_url': overall_zip_url
         })
-    except sqlite3.Error as e_sql:
-        logging.error(f"SQLite error in get_history_item_details for ID {operation_id}: {e_sql}", exc_info=True)
-        return jsonify({'error': 'Database error while fetching details.', 'details': str(e_sql), 'status_code': 500}), 500
     except Exception as e:
-        logging.error(f"Unexpected error in get_history_item_details for ID {operation_id}: {e}", exc_info=True)
-        return jsonify({'error': 'An unexpected error occurred.', 'details': str(e), 'status_code': 500}), 500
+        logging.error(f"Error in get_history_item_details for ID {operation_id}: {e}", exc_info=True)
+        return jsonify({'error': 'An error occurred.', 'details': str(e), 'status_code': 500}), 500
+
+def load_inputs_from_history(operation_id):
+    inputs_path = os.path.join(HISTORY_FILES_BASE, operation_id, "inputs")
+    in_memory_files = {}
+    
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        cursor.execute("SELECT original_filename, stored_filename FROM operation_files WHERE operation_id = ? AND file_type = 'input'", (operation_id,))
+        files_rows = cursor.fetchall()
+        
+        for row in files_rows:
+            orig_name = row['original_filename']
+            stored_name = row['stored_filename']
+            file_path = os.path.join(inputs_path, stored_name)
+            
+            if os.path.exists(file_path):
+                with open(file_path, 'rb') as f:
+                    in_memory_files[orig_name] = f.read()
+    except Exception as e:
+        logging.error(f"Error loading inputs from history for op {operation_id}: {e}")
+        
+    return in_memory_files
+
+@app.route('/submit_review', methods=['POST'])
+def submit_review():
+    data = request.json
+    operation_id = data.get('operation_id')
+    modifications = data.get('modifications') 
+    
+    if not operation_id or not modifications:
+        return jsonify({'status': 'error', 'message': 'Invalid data'}), 400
+        
+    current_op_history_path = os.path.join(HISTORY_FILES_BASE, operation_id)
+    state_path = os.path.join(current_op_history_path, 'state.pkl')
+    
+    if not os.path.exists(state_path):
+        return jsonify({'status': 'error', 'message': 'Operation expired or invalid'}), 404
+        
+    try:
+        with open(state_path, 'rb') as f:
+            state_data = pickle.load(f)
+            
+        in_memory_files = load_inputs_from_history(operation_id)
+        
+        operation_type = state_data.get('operation_type', 'translate')
+        results_dict = {}
+        
+        if operation_type == 'translate':
+            results_dict = translate.render_after_review(in_memory_files, state_data, modifications)
+        elif operation_type == 'both':
+            results_dict = colorize_and_translate.render_after_review(in_memory_files, state_data, modifications)
+        elif operation_type == 'subtitle':
+            results_dict = subtitles.render_after_review(in_memory_files, state_data, modifications)
+        else:
+             return jsonify({'status': 'error', 'message': f'Unsupported review operation: {operation_type}'}), 400
+        
+        # Process Results (Save, Zip, DB Update) - Duplicated logic for robustness
+        current_op_outputs_path = os.path.join(current_op_history_path, "outputs")
+        preview_files_data = []
+        direct_download_files = []
+        valid_results_for_zip = {}
+        
+        db = get_db()
+        cursor = db.cursor()
+        
+        for filename_out, content_bytes in results_dict.items():
+            original_output_filename = secure_filename(filename_out)
+            if not original_output_filename: continue
+            
+            output_file_bytes = content_bytes
+            valid_results_for_zip[original_output_filename] = output_file_bytes
+            
+            stored_output_filename_history = f"output_{uuid.uuid4()}_{original_output_filename}"
+            stored_output_path_history = os.path.join(current_op_outputs_path, stored_output_filename_history)
+            with open(stored_output_path_history, 'wb') as f_hist_out:
+                f_hist_out.write(output_file_bytes)
+                
+            mimetype_out, _ = mimetypes.guess_type(original_output_filename)
+            cursor.execute('''
+                INSERT INTO operation_files (operation_id, file_type, original_filename, stored_filename, mimetype)
+                VALUES (?, 'output', ?, ?, ?)
+            ''', (operation_id, original_output_filename, stored_output_filename_history, mimetype_out or 'application/octet-stream'))
+            
+            mimetype_preview = mimetype_out or 'application/octet-stream'
+            if original_output_filename.lower().endswith('.webp') and (not mimetype_preview or mimetype_preview == 'application/octet-stream'):
+                mimetype_preview = 'image/webp'
+            
+            if mimetype_preview.startswith(('image/', 'video/', 'audio/')) or mimetype_preview == 'text/plain':
+                 try:
+                    base64_content = base64.b64encode(output_file_bytes).decode('utf-8')
+                    preview_files_data.append({
+                        "name": original_output_filename, "mimetype": mimetype_preview,
+                        "data_url": f"data:{mimetype_preview};base64,{base64_content}"
+                    })
+                 except: pass
+        
+        zip_download_url = None
+        zip_output_filename_for_db = None
+        if valid_results_for_zip:
+            op_name_for_zip = "review_" + operation_type
+            zip_filename_short = f'results_{operation_id.split("-")[0]}_{op_name_for_zip}.zip'
+            zip_filepath_uploads = os.path.join(UPLOAD_FOLDER, zip_filename_short)
+            try:
+                with zipfile.ZipFile(zip_filepath_uploads, 'w', compression=zipfile.ZIP_DEFLATED) as zipf:
+                    for fn_zip, content_bytes_zip in valid_results_for_zip.items():
+                        zipf.writestr(secure_filename(fn_zip), content_bytes_zip)
+                zip_download_url = url_for('download_file', filename=zip_filename_short, _external=False)
+                zip_output_filename_for_db = zip_filename_short
+            except Exception: pass
+            
+        cursor.execute("UPDATE operations SET status = 'success', output_zip_filename = ? WHERE id = ?", 
+                       (zip_output_filename_for_db, operation_id))
+        db.commit()
+        
+        return jsonify({
+            'status': 'ready', 'preview_files': preview_files_data,
+            'zip_download_url': zip_download_url, 'direct_download_files': direct_download_files
+        })
+
+    except Exception as e:
+        logging.error(f"Error in submit_review: {e}", exc_info=True)
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=7860, debug=True, use_reloader=False, threaded=True)
